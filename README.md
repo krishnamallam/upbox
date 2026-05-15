@@ -303,6 +303,12 @@ upbox is not legal advice. Consult counsel for compliance certification.
 - SQLite audit log
 - JSONL + CSV export
 
+**v0.1.1 — distribution polish** (target: 1–2 weeks post-v0.1)
+
+- **Native binaries** — single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
+- Firefox NSS auto-install on Windows.
+- Live-reload of YAML rule files (currently requires `upbox start` restart).
+
 **v0.2 — "compliance-ready"** (target: 1 August 2026 — eve of AI Act enforcement)
 
 - Article 26 audit-log export format
