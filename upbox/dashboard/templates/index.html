@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block main %}
+<div class="layout">
+  <section class="feed" id="feed">
+    {% include "partials/recent.html" %}
+  </section>
+  <aside class="detail" id="detail">
+    <p class="muted">Click a request to see headers and body excerpt.</p>
+  </aside>
+</div>
+{% endblock %}

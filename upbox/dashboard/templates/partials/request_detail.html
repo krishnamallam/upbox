@@ -1,0 +1,30 @@
+<div class="detail-card">
+  <div class="detail-head">
+    <span class="tag">{{ row['tool'] or 'Unknown' }}</span>
+    <strong>{{ row['method'] }}</strong>
+    <span>{{ row['scheme'] }}://{{ row['host'] }}{{ row['path'] }}</span>
+    {% if row['blocked'] %}<span class="tag tag-block">BLOCKED</span>{% endif %}
+  </div>
+  <dl class="kv">
+    <dt>Time</dt>            <dd>{{ row['ts'] }}</dd>
+    <dt>Status</dt>          <dd>{{ row['status'] or '—' }}</dd>
+    <dt>Request size</dt>    <dd>{{ row['req_bytes'] | bytes }}</dd>
+    <dt>Response size</dt>   <dd>{{ row['resp_bytes'] | bytes }}</dd>
+    <dt>Body hash</dt>       <dd class="mono small">{{ row['body_hash'] or '—' }}</dd>
+    {% if row['redactions_applied_json'] %}
+    <dt>Redactions</dt>      <dd class="mono small">{{ row['redactions_applied_json'] }}</dd>
+    {% endif %}
+  </dl>
+  <details class="collapsible">
+    <summary>Headers ({{ headers | length }})</summary>
+    <dl class="kv">
+      {% for k, v in headers.items() %}
+      <dt class="mono">{{ k }}</dt><dd class="mono">{{ v }}</dd>
+      {% endfor %}
+    </dl>
+  </details>
+  <details class="collapsible" open>
+    <summary>Body excerpt (first 4 KB)</summary>
+    <pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
+  </details>
+</div>

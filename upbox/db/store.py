@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from importlib import resources
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, cast
 
 DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
 BODY_EXCERPT_MAX = 4096
@@ -109,6 +109,30 @@ class Store:
             self._conn.execute(
                 "SELECT * FROM requests ORDER BY id DESC LIMIT ?",
                 (limit,),
+            )
+        )
+
+    def query_by_id(self, request_id: int) -> sqlite3.Row | None:
+        row = self._conn.execute(
+            "SELECT * FROM requests WHERE id = ?",
+            (request_id,),
+        ).fetchone()
+        return cast("sqlite3.Row | None", row)
+
+    def per_tool_summary(self) -> list[sqlite3.Row]:
+        """Per-tool aggregates for the dashboard tiles."""
+        return list(
+            self._conn.execute(
+                """
+                SELECT
+                    COALESCE(tool, 'Unknown') AS tool,
+                    COUNT(*)                  AS request_count,
+                    COALESCE(SUM(req_bytes), 0) AS total_req_bytes,
+                    SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked_count
+                FROM requests
+                GROUP BY tool
+                ORDER BY request_count DESC
+                """
             )
         )
 
