@@ -1,0 +1,45 @@
+# Tool fingerprints for upbox. Each rule is matched on a request as it
+# arrives at the proxy. ALL fields specified under `match` must hold for
+# the rule to match. Rules are evaluated in order; first match wins.
+
+- name: Claude Desktop
+  match:
+    hosts: ["api.anthropic.com"]
+    headers: ["x-app: claude-desktop"]
+
+- name: Claude Code
+  match:
+    ua_contains: ["claude-code", "anthropic-ai/sdk"]
+    hosts: ["api.anthropic.com"]
+
+- name: Cursor
+  match:
+    ua_contains: ["Cursor/"]
+    hosts: ["api.cursor.sh", "api2.cursor.sh"]
+
+- name: GitHub Copilot
+  match:
+    ua_contains: ["GitHubCopilot", "copilot-"]
+    hosts: ["api.githubcopilot.com", "copilot-proxy.githubusercontent.com"]
+
+- name: ChatGPT
+  match:
+    ua_contains: ["ChatGPT"]
+    hosts: ["chat.openai.com", "chatgpt.com"]
+
+- name: Codeium
+  match:
+    ua_contains: ["codeium"]
+    hosts: ["server.codeium.com"]
+
+- name: OpenAI API
+  match:
+    hosts: ["api.openai.com"]
+
+- name: Anthropic API
+  match:
+    hosts: ["api.anthropic.com"]
+
+- name: Google Gemini
+  match:
+    hosts: ["generativelanguage.googleapis.com"]

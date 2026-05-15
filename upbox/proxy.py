@@ -17,6 +17,7 @@ from mitmproxy.tools.dump import DumpMaster
 
 from upbox import ca
 from upbox.addons.capture import CaptureAddon
+from upbox.addons.fingerprint import FingerprintAddon
 from upbox.db.store import Store
 
 log = logging.getLogger(__name__)
@@ -38,7 +39,8 @@ async def _run(host: str, port: int) -> None:
     master = DumpMaster(opts)
 
     store = Store()
-    master.addons.add(CaptureAddon(store))  # type: ignore[no-untyped-call]
+    # Fingerprint runs on the request hook so capture (response hook) sees the tag.
+    master.addons.add(FingerprintAddon(), CaptureAddon(store))  # type: ignore[no-untyped-call]
 
     log.info("upbox proxy listening on %s:%d", host, port)
     try:
