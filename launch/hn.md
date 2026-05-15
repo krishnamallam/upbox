@@ -46,8 +46,8 @@ Install on Linux / macOS:
     upbox init        # one-time CA install
     upbox start       # proxy on :8888, dashboard on :8800
 
-Code: <repo URL>
-Docs: <docs URL>
+Code: https://github.com/krishnamallam/upbox
+Homepage: https://upbox.sh
 
 Built it over two weeks. The README has the full architecture
 discussion and EU AI Act mapping. Happy to answer anything.

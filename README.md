@@ -1,10 +1,13 @@
 # upbox
 
-> See what your AI tools are actually sending.
+> See, audit, and control what your AI tools send to the cloud.
+
+**Homepage:** <https://upbox.sh> · **Repo:** <https://github.com/krishnamallam/upbox>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)](#roadmap)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](#)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-lightgrey.svg)](#)
 
 **upbox** is a local-only proxy and dashboard that shows you, per tool and per request, exactly what code, files, and prompts your AI assistants ship to the cloud.
 

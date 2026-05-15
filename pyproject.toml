@@ -29,9 +29,11 @@ dependencies = [
 upbox = "upbox.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/krishnamallam/upbox"
+Homepage = "https://upbox.sh"
 Repository = "https://github.com/krishnamallam/upbox"
 Issues = "https://github.com/krishnamallam/upbox/issues"
+Documentation = "https://github.com/krishnamallam/upbox#readme"
+Changelog = "https://github.com/krishnamallam/upbox/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
