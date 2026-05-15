@@ -16,6 +16,7 @@ uv run upbox start                      # proxy + dashboard
 ## Key Decisions
 
 - **mitmproxy as the proxy core** (MIT). Use its addon API; never fork.
+- **Two processes:** `upbox proxy` (mitmproxy), `upbox dashboard` (FastAPI), `upbox start` (supervisor). IPC via SQLite WAL. Never embed mitmproxy inside FastAPI.
 - **SQLite via stdlib `sqlite3` in WAL mode**. No ORM, schema is small.
 - **HTMX + Pico.css, no build step**. Dashboard is server-rendered partials.
 - **`127.0.0.1` only**. The dashboard must never bind a public interface.

@@ -25,6 +25,34 @@
 | Type check | `mypy` strict on `upbox/` | Off in `tests/`. |
 | CI | GitHub Actions | Linux + macOS, py3.12 + 3.13. |
 | Release | PyPI + Homebrew tap | `pipx install upbox` is the canonical install. |
+| Process model | Two processes, SQLite WAL as IPC | mitmproxy and FastAPI both want their own event loop. Threading them inside one process means broken signal handling and messy shutdown. See "Process architecture" below. |
+
+---
+
+## Process architecture
+
+upbox runs as **two cooperating processes** plus a thin supervisor. They share `~/.upbox/upbox.db` (SQLite in WAL mode, multi-reader + single-writer).
+
+```
+                        upbox start (supervisor)
+                              │
+                ┌─────────────┴─────────────┐
+                ▼                           ▼
+        upbox proxy                  upbox dashboard
+        (mitmproxy main loop)        (uvicorn + FastAPI)
+        port 8888                    port 8800 (127.0.0.1 only)
+                │                           │
+                └──────────┬────────────────┘
+                           ▼
+                    ~/.upbox/upbox.db
+                    (SQLite WAL)
+```
+
+- **`upbox proxy`** — mitmproxy running as the main process with the upbox addons loaded (capture, fingerprint, redact, enforce). Owns the cert store. Writes flows to SQLite.
+- **`upbox dashboard`** — uvicorn + FastAPI on `127.0.0.1:8800`. Reads SQLite. Never directly touches mitmproxy. HTMX polls `/lens/...` partials.
+- **`upbox start`** — supervisor (~50 lines). Spawns both as subprocesses, forwards SIGINT / SIGTERM, exits non-zero if either dies. `upbox stop` cleans up.
+
+**Why two processes:** mitmproxy is built around its own asyncio `Master` loop with its own signal handlers. So is uvicorn. Stuffing one inside the other's thread led to lost Ctrl+C, messy shutdowns, and addon hooks running on unexpected threads. Two processes is +50 lines of supervisor code and gets clean lifecycle, isolated crashes (if mitmproxy dies the dashboard still serves the last hour of data), and standard signal handling on both sides.
 
 ---
 
@@ -49,8 +77,9 @@ upbox/
 │   ├── __main__.py                      # `python -m upbox` → cli.app()
 │   ├── cli.py                           # typer CLI: init, start, stop, status, export
 │   ├── config.py                        # config dataclasses + YAML loader
-│   ├── ca.py                            # generate / install / uninstall local CA
-│   ├── proxy.py                         # mitmproxy bootstrap (loads addons)
+│   ├── ca.py                            # generate / install / uninstall local CA (system trust + NSS)
+│   ├── supervisor.py                    # `upbox start` — spawns proxy + dashboard, forwards signals
+│   ├── proxy.py                         # `upbox proxy` — mitmproxy main process (loads addons)
 │   ├── addons/
 │   │   ├── __init__.py
 │   │   ├── capture.py                   # persists every flow to SQLite
@@ -121,21 +150,25 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 - `tests/conftest.py` + one smoke test (`test_cli_help`).
 - Commit: `chore: project scaffold`.
 
-### Day 2 — Local CA
+### Day 2 — Local CA + status doctor
 
-**Outcome:** `upbox init` generates a CA and installs it to the system trust store on macOS + Linux.
+**Outcome:** `upbox init` generates a CA and installs it everywhere the AI tools actually look. `upbox status` reports each layer so silent-CA-missing bugs surface immediately.
 
 - `upbox/ca.py`: generate cert + key in `~/.upbox/ca/` using `cryptography`.
 - macOS: `security add-trusted-cert` (sudo prompt is fine).
-- Linux: copy to `/usr/local/share/ca-certificates/` + `update-ca-certificates`.
+- **Linux (three cert stores — all needed):**
+  - System trust: copy to `/usr/local/share/ca-certificates/` + `update-ca-certificates`. Covers curl, wget, system Python.
+  - NSS: if `certutil` is on PATH, add to `~/.pki/nssdb/`. Covers Firefox, Chrome (sometimes), NSS-based Electron apps. If `certutil` missing, print install command and skip.
+  - Electron / Node: print copy-pasteable launch hints for known apps (`NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem cursor`, similar for Claude desktop, VSCode). Ship as a docs file too.
 - Windows: ship clear manual instructions (defer auto-install to v0.2).
-- `upbox init --uninstall` reverses the install.
-- Tests: cert generation only (no system install in CI).
-- Commit: `feat(ca): generate and install local CA`.
+- `upbox init --uninstall` reverses every layer that was installed.
+- **`upbox status`** doctor command: reports CA presence in each layer (system trust ✓ / NSS ✓ / env-var hint shown ✓), proxy port listening, dashboard port listening, last request timestamp. Single command answers "why isn't traffic showing up?"
+- Tests: cert generation (no system install in CI). `init --uninstall` must reverse what `init` installed (use a tmp `CA_DIR` to avoid touching the real system).
+- Commit: `feat(ca): generate, install, and doctor the local CA`.
 
-### Day 3 — Capture
+### Day 3 — Capture (proxy process)
 
-**Outcome:** `upbox start` boots mitmproxy; every flow lands in SQLite.
+**Outcome:** `upbox proxy` runs mitmproxy as the main process; every flow lands in SQLite. (Dashboard process comes Day 5; supervisor Day 5 too.)
 
 - `upbox/db/schema.sql`:
   ```sql
@@ -160,11 +193,15 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
   CREATE INDEX idx_requests_tool ON requests(tool);
   CREATE INDEX idx_requests_host ON requests(host);
   ```
-- `upbox/db/store.py`: `insert_request`, `query_recent`, `export_jsonl`, `export_csv`. WAL mode.
-- `upbox/addons/capture.py`: mitmproxy addon — `response()` hook → `store.insert_request`.
-- `upbox/proxy.py`: `run()` starts mitmproxy with the capture addon loaded.
-- Tests: in-memory SQLite, fake mitmproxy flow → exactly 1 row, correct fields.
-- Commit: `feat(capture): persist every flow to SQLite`.
+- `upbox/db/store.py`: `insert_request`, `query_recent`, `export_jsonl`, `export_csv`. **Opens the DB with `PRAGMA journal_mode=WAL` and asserts it stuck.**
+- `upbox/addons/capture.py`: mitmproxy addon — `response()` hook → `store.insert_request`. **Truncates `body_excerpt` at 4096 bytes before persisting.** **Wraps the hook body in a try/except so an addon exception never crashes the proxy** (per `.claude/rules/error-handling.md`).
+- `upbox/proxy.py`: `run()` starts mitmproxy with the capture addon loaded. This *is* the `upbox proxy` entry point — mitmproxy stays the main event loop.
+- Tests:
+  - in-memory SQLite, fake mitmproxy flow → exactly 1 row, correct fields
+  - `PRAGMA journal_mode` returns `wal` after store init
+  - body excerpt is exactly the first 4096 bytes when input is larger
+  - raising `RuntimeError` inside the capture hook does not stop the next flow from being persisted
+- Commit: `feat(capture): persist every flow to SQLite (WAL + 4KB cap + addon-exception isolation)`.
 
 ### Day 4 — Tool fingerprinting
 
@@ -201,16 +238,17 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 - Tests: synthetic flow per tool → correct classification.
 - Commit: `feat(fingerprint): classify flows by AI tool`.
 
-### Day 5 — Dashboard skeleton
+### Day 5 — Dashboard process + supervisor
 
-**Outcome:** `http://127.0.0.1:8800/` shows a live feed of requests.
+**Outcome:** `upbox dashboard` runs FastAPI/uvicorn as the main process on `127.0.0.1:8800`. `upbox start` is the supervisor that spawns `upbox proxy` and `upbox dashboard` together. Ctrl+C cleanly stops both.
 
-- `upbox/dashboard/app.py`: FastAPI mount; lifespan hook starts mitmproxy in a background thread.
+- `upbox/dashboard/app.py`: FastAPI mount on `127.0.0.1:8800` only. **No in-process mitmproxy** — it's a separate process. The dashboard reads SQLite only.
 - `templates/base.html`: shell with Pico.css.
 - `templates/index.html`: per-tool tiles (count + bytes) + scrolling request list.
 - HTMX polls `/requests/recent` every 2 seconds.
 - `routes.py`: `GET /` (full page), `GET /requests/recent` (partial).
-- Commit: `feat(dashboard): live request feed`.
+- **`upbox/supervisor.py`** (~50 lines): `upbox start` spawns `upbox proxy` and `upbox dashboard` via `subprocess.Popen`. Forwards `SIGINT` and `SIGTERM` to both. Polls every 500ms; if either dies, kill the other and exit with the dead child's status. `upbox stop` finds the running supervisor via PID file in `~/.upbox/` and sends `SIGTERM`.
+- Commit: `feat(dashboard): standalone dashboard process + supervisor`.
 
 ### Day 6 — Request detail
 
@@ -221,9 +259,9 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 - Show: tool, method, host, path, status, timing, headers (collapsible), body excerpt (first 4 KB, with toggle to load full from disk).
 - Commit: `feat(dashboard): per-request detail view`.
 
-### Day 7 — Redaction engine
+### Day 7 — Content-aware redaction engine
 
-**Outcome:** Configurable regex redactions strip secrets *before* forwarding.
+**Outcome:** Configurable redactions strip secrets *before* forwarding, correctly handling JSON bodies and gzipped traffic (which is what AI APIs actually send).
 
 - `upbox/rules/redact.yaml`:
   ```yaml
@@ -241,10 +279,22 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
     multiline: true
     replace: "[REDACTED:env-var]"
   ```
-- `upbox/addons/redact.py`: apply patterns to the request body in the `request()` hook; record what was redacted in `redactions_applied_json`.
+- **`upbox/addons/redact.py` — content-aware pipeline:**
+  1. Read `Content-Encoding`. Decompress if `gzip` / `br`. If unknown, skip redaction and record `redactions_applied_json: {"skipped": "encoding=<x>"}`.
+  2. Read `Content-Type`. Dispatch by type:
+     - `application/json` or `application/*+json`: `json.loads`, walk the structure, apply regex to every string value, re-serialise with `json.dumps`. Never touches keys, never breaks structure.
+     - `text/*`: byte-level regex with JSON-safe replacement strings (no unescaped quotes).
+     - Anything else (binary, multipart, octet-stream): skip with reason `{"skipped": "binary or non-text content-type"}`.
+  3. Re-compress with the original encoding if any.
+  4. Record what was redacted (rule name + count) in `redactions_applied_json` for the dashboard.
 - Dashboard preview mode: show what *would* be redacted without enabling the rule.
-- Tests: each pattern + a combined-pattern test on a realistic prompt.
-- Commit: `feat(redact): regex redaction engine`.
+- Tests:
+  - **[CRITICAL]** JSON body with a secret-bearing value: redacted body is still valid JSON, original keys preserved.
+  - **[CRITICAL]** gzipped JSON body: decompressed → redacted → recompressed with same encoding header; downstream decompresses successfully.
+  - non-JSON binary body (image upload): skipped, `redactions_applied_json` records reason.
+  - malformed JSON body: skipped gracefully, flow still forwarded (no exception).
+  - combined patterns on a realistic prompt (the existing happy-path test).
+- Commit: `feat(redact): content-aware redaction engine (JSON + gzip + skip-binary)`.
 
 ### Day 8 — Domain allowlist
 
@@ -261,10 +311,13 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
   default:
     block_unknown: warn
   ```
-- `upbox/addons/enforce.py`: check destination; mark `blocked=1` and short-circuit if policy is `block`.
+- `upbox/addons/enforce.py`: check destination; mark `blocked=1` and short-circuit if policy is `block`. **Blocked flows are still recorded by the capture addon — the audit trail must include block events.**
 - Dashboard: red row for blocked, yellow for warn.
-- Tests: synthetic flows + allowlist permutations.
-- Commit: `feat(enforce): domain allowlist per tool`.
+- Tests:
+  - synthetic flows + allowlist permutations (happy-path).
+  - a *blocked* flow still produces a SQLite row with `blocked=1` (audit trail preserved).
+  - `block_unknown: warn` does not actually block the request, only flags it.
+- Commit: `feat(enforce): domain allowlist per tool (audit preserved on block)`.
 
 ### Day 9 — Polish pass
 
@@ -280,7 +333,10 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 
 **Outcome:** Run a real session. Capture the launch screenshot.
 
-- Configure Cursor, Claude desktop, and ChatGPT to use the upbox proxy.
+- **E2E smoke tests (must pass before manual testing):**
+  - `curl --proxy http://127.0.0.1:8888 --cacert ~/.upbox/ca/upbox-ca.pem https://httpbin.org/anything` round-trips through proxy; row appears in SQLite within 2s; dashboard shows it.
+  - Launch Cursor with `NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem` on Ubuntu; trigger a Tab completion; at least one captured request visible in dashboard within 2s.
+- Configure Cursor, Claude desktop / Claude Code, and ChatGPT to use the upbox proxy.
 - Use them naturally for ~30 minutes of real work.
 - Identify and fix the worst bugs (some will exist).
 - Take the launch screenshot — top tiles + per-tool table + a striking request.
@@ -311,15 +367,16 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 
 ### Day 13 — Buffer / launch prep
 
-**Outcome:** Everything works. Launch assets ready.
+**Outcome:** Everything works. Launch assets ready. Supervisor proves resilient under failure.
 
 - Run upbox for a full work day. Note every annoyance. Fix the top 3.
+- **Supervisor crash-recovery test:** start `upbox start`, kill `upbox proxy` PID mid-session, verify the dashboard still serves the last captured data and the supervisor exits non-zero. Then the same with the dashboard PID — verify proxy keeps capturing and supervisor exits non-zero. (Validates the Issue 1 process-isolation decision under real failure.)
 - Draft the launch X thread: screenshot + 3-line story + repo link → `launch/x-thread.md`.
 - Draft the HN Show post → `launch/hn.md`.
 - Draft the r/selfhosted + r/privacy crosspost → `launch/reddit.md`.
 - Build the launch screenshot (real data, real story, real numbers).
 - PyPI publish dry-run.
-- Commit: `chore: launch assets`.
+- Commit: `chore: launch assets + supervisor crash-recovery test`.
 
 ### Day 14 — Ship
 
@@ -371,7 +428,8 @@ Two viral moments from one codebase. Arc 1 lands among devs. Arc 2 lands among s
 
 | Risk | Mitigation |
 |---|---|
-| Some AI tools pin certificates and reject the local CA | Document which ones work; ship a clear "what won't work" doc. v0.1 covers tools that *do* work (Cursor, Copilot via VSCode, ChatGPT web, OpenAI/Anthropic API clients). |
+| Some AI tools pin certificates and reject the local CA | Document which ones work; ship a clear "what won't work" doc. `upbox status` doctor command reports cert trust per layer so misconfiguration surfaces immediately. v0.1 covers tools that *do* work (Cursor, Copilot via VSCode, ChatGPT web, OpenAI/Anthropic API clients). |
+| Linux apps don't all read the same cert store | Day 2 installs to system trust + NSS (`~/.pki/nssdb`) and prints `NODE_EXTRA_CA_CERTS` hints for Electron apps. `upbox status` checks all three layers. |
 | mitmproxy performance under heavy AI traffic | Profile on day 10. Cap stored body excerpt at 4 KB. Drop request bodies entirely past a configurable size. WAL mode + batched inserts. |
 | CA install on Windows is fiddly | Defer auto-install to v0.2; ship clear manual docs in v0.1. |
 | The launch lands flat | Two-arc plan is the insurance. Two shots, not one. |
