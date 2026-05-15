@@ -39,24 +39,192 @@ Install a local CA, point your AI tools at the upbox proxy, then watch.
 - **Audit log.** JSON Lines + CSV export. Tamper-evident hash chain. Article-26-friendly fields.
 - **Local-only.** SQLite on disk. The dashboard binds to `127.0.0.1` only. No outbound calls from upbox itself.
 
-## Quick start
+## Install
 
-```bash
-# Install
+Pick whichever method fits your setup. All of them give you the same `upbox` command on `PATH`. Python 3.12+ is required.
+
+### Method 1 — pipx *(recommended for most users)*
+
+`pipx` installs CLI tools into an isolated venv but keeps them on `PATH`. No conflicts with your system Python or other projects.
+
+```sh
+# Install pipx if you don't already have it
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+
+# Install upbox
 pipx install upbox
 
-# Generate and install the local CA (one time)
-upbox init
-
-# Boot the proxy + dashboard
-upbox start
-#  Proxy:     http://127.0.0.1:8888
-#  Dashboard: http://127.0.0.1:8800
-
-# Configure your AI tool to use the proxy, then open the dashboard
+# Verify
+upbox --help
 ```
 
-Per-tool setup recipes: [docs/configuring-tools.md](docs/configuring-tools.md).
+### Method 2 — uv tool
+
+If you use [uv](https://docs.astral.sh/uv/) (Astral's Python toolchain), it has a built-in tool installer that's faster than pipx.
+
+```sh
+uv tool install upbox
+upbox --help
+```
+
+### Method 3 — uvx *(no install, run once)*
+
+Run upbox without installing anything globally. uv resolves and caches deps the first time, then it's instant.
+
+```sh
+uvx upbox --help
+uvx upbox init
+uvx upbox start
+```
+
+Good for one-shot smoke tests; less good as a daily driver because each command re-resolves.
+
+### Method 4 — pip + venv *(no extra tools)*
+
+```sh
+python3 -m venv ~/.venvs/upbox
+~/.venvs/upbox/bin/pip install upbox
+~/.venvs/upbox/bin/upbox --help
+
+# Optional: symlink to PATH
+ln -s ~/.venvs/upbox/bin/upbox ~/.local/bin/upbox
+```
+
+On Ubuntu 24+, Debian 12+, and recent Fedora, system `pip install` is blocked by [PEP 668](https://peps.python.org/pep-0668/). Use a venv (above) or one of methods 1–3.
+
+### Method 5 — From source *(latest `main`)*
+
+For the bleeding edge or for development:
+
+```sh
+git clone https://github.com/krishnamallam/upbox.git
+cd upbox
+uv sync                      # installs runtime + dev deps from uv.lock
+uv run upbox --help
+```
+
+### Method 6 — Install from a tag or branch directly
+
+```sh
+# Latest tagged release
+pipx install git+https://github.com/krishnamallam/upbox.git@v0.1.0
+
+# Latest main
+pipx install git+https://github.com/krishnamallam/upbox.git@main
+
+# Or via pip/venv
+pip install git+https://github.com/krishnamallam/upbox.git@v0.1.0
+```
+
+### Method 7 — Editable install *(hacking on upbox)*
+
+```sh
+git clone https://github.com/krishnamallam/upbox.git
+cd upbox
+uv sync --dev                # adds pytest, ruff, mypy, httpx
+uv run upbox --help          # runs your local checkout
+```
+
+Edits to the code take effect immediately. See [Development](#development) for the test + lint commands.
+
+## Quick start
+
+After install, three commands get you running:
+
+```sh
+upbox init        # one-time: generates + installs the local CA
+upbox start       # boots proxy on :8888 and dashboard on :8800
+# Ctrl+C to stop both.
+```
+
+Then:
+
+1. Point an AI tool at `http://127.0.0.1:8888` (or set `HTTPS_PROXY=http://127.0.0.1:8888`).
+2. Open the dashboard at `http://127.0.0.1:8800`.
+
+Per-tool setup recipes (Cursor, Claude desktop / Code, GitHub Copilot, ChatGPT, curl, SDK clients): [docs/configuring-tools.md](docs/configuring-tools.md).
+
+## Verify the install
+
+These should all succeed:
+
+```sh
+upbox --help                            # CLI lists: init, start, proxy, dashboard, stop, status, export
+upbox status                            # reports CA trust per layer for your platform
+```
+
+End-to-end smoke test (after `upbox init`):
+
+```sh
+# Terminal 1
+upbox proxy
+
+# Terminal 2
+curl --proxy http://127.0.0.1:8888 \
+     --cacert ~/.upbox/ca/upbox-ca.pem \
+     https://httpbin.org/anything
+
+# Terminal 3
+upbox dashboard
+# open http://127.0.0.1:8800 — the curl request should appear within ~2s
+```
+
+If the curl line errors with a TLS warning, your CA didn't install cleanly — run `upbox status` to see which layer is missing and fix it (see [docs/installing-ca.md](docs/installing-ca.md)).
+
+## Platform notes
+
+- **macOS** — `upbox init` prompts for sudo to install into the System keychain. Cursor, Claude Desktop, VSCode, and browsers all read from it.
+- **Linux** — before `upbox init`, install `libnss3-tools` (Debian / Ubuntu) or `nss-tools` (Fedora) so Firefox / Chrome / NSS-based Electron apps trust the CA too. For Node-based Electron apps (Cursor, Claude Desktop, VSCode), launch them with `NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem`.
+- **Windows** — `upbox init` writes to the per-user Trusted Root store, no admin elevation required. Firefox uses its own NSS db; import the cert manually via Settings → Privacy → Certificates → View Certificates → Authorities → Import.
+
+Full per-platform install + uninstall walkthrough: [docs/installing-ca.md](docs/installing-ca.md).
+
+## Uninstall
+
+```sh
+upbox init --uninstall                  # remove CA from every trust store it was installed into
+rm -rf ~/.upbox/                        # remove cert, audit db, rules (optional)
+
+# Then uninstall the package itself with whichever installer you used:
+pipx uninstall upbox                    # if you used pipx
+uv tool uninstall upbox                 # if you used uv tool
+~/.venvs/upbox/bin/pip uninstall upbox  # if you used a venv
+```
+
+## Development
+
+Clone + install dev deps:
+
+```sh
+git clone https://github.com/krishnamallam/upbox.git
+cd upbox
+uv sync --dev
+```
+
+Then:
+
+```sh
+# Run the full test suite (~2s, 85 tests)
+uv run pytest -v
+
+# Run a single test file
+uv run pytest tests/test_capture.py -v
+
+# Lint + format
+uv run ruff check .
+uv run ruff format .
+
+# Type check
+uv run mypy upbox
+
+# Run upbox from your checkout (no install needed)
+uv run upbox --help
+uv run upbox status
+uv run upbox proxy
+```
+
+CI runs the same on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The full 14-day build plan and the architectural decisions behind it live in [PLAN.md](PLAN.md).
 
 ## Architecture
 
