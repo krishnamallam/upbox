@@ -6,7 +6,6 @@ test_supervisor.py uses FakeProcs; this one uses real subprocesses.
 
 from __future__ import annotations
 
-import signal
 import subprocess
 import sys
 import time
@@ -43,7 +42,8 @@ def test_supervisor_terminates_sibling_when_one_real_subprocess_dies(
 
     def kill_first_after_delay() -> None:
         time.sleep(0.3)
-        children[0].send_signal(signal.SIGKILL)
+        # Cross-platform: SIGKILL on POSIX, TerminateProcess on Windows.
+        children[0].kill()
 
     threading.Thread(target=kill_first_after_delay, daemon=True).start()
 

@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 PID_FILE = Path.home() / ".upbox" / "supervisor.pid"
 POLL_INTERVAL = 0.5
 TERMINATE_GRACE = 5.0
+IS_WINDOWS = sys.platform == "win32"
 
 
 def run(proxy_port: int = 8888, dashboard_port: int = 8800) -> int:
@@ -45,7 +46,10 @@ def run(proxy_port: int = 8888, dashboard_port: int = 8800) -> int:
         _stop_all(children)
 
     signal.signal(signal.SIGINT, _forward_signal)
-    signal.signal(signal.SIGTERM, _forward_signal)
+    if not IS_WINDOWS:
+        # SIGTERM only exists on POSIX. Windows uses Ctrl+C / Ctrl+Break,
+        # both of which raise SIGINT in Python, which is already handled.
+        signal.signal(signal.SIGTERM, _forward_signal)
 
     print(f"upbox: proxy=127.0.0.1:{proxy_port}  dashboard=http://127.0.0.1:{dashboard_port}")
 
@@ -69,7 +73,9 @@ def _spawn(args: list[str]) -> subprocess.Popen[bytes]:
 def _stop_all(procs: dict[str, subprocess.Popen[bytes]]) -> None:
     for proc in procs.values():
         if proc.poll() is None:
-            proc.send_signal(signal.SIGTERM)
+            # `terminate()` is cross-platform: SIGTERM on POSIX,
+            # TerminateProcess on Windows.
+            proc.terminate()
     for proc in procs.values():
         try:
             proc.wait(timeout=TERMINATE_GRACE)

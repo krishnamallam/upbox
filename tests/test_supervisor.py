@@ -21,14 +21,14 @@ class FakeProc:
     def __init__(self) -> None:
         self.pid = 12345
         self._exit_code: int | None = None
-        self.signals_received: list[int] = []
+        self.terminate_calls = 0
         self.killed = False
 
     def poll(self) -> int | None:
         return self._exit_code
 
-    def send_signal(self, signum: int) -> None:
-        self.signals_received.append(signum)
+    def terminate(self) -> None:
+        self.terminate_calls += 1
         self._exit_code = 143  # SIGTERM convention
 
     def kill(self) -> None:
@@ -98,6 +98,5 @@ def test_supervisor_terminates_sibling_when_one_child_dies(
 
     threading.Thread(target=kill_first, daemon=True).start()
     supervisor.run()
-    import signal as _sig
 
-    assert _sig.SIGTERM in spawned[1].signals_received
+    assert spawned[1].terminate_calls >= 1

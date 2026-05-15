@@ -101,6 +101,8 @@ def status() -> None:
             typer.echo("  Linux NSS:             SKIPPED (install libnss3-tools or nss-tools)")
         else:
             typer.echo(f"  Linux NSS:             {_yn(s.in_linux_nss)}")
+    elif system == "Windows":
+        typer.echo(f"  Windows Root store:    {_yn(s.in_windows_trust)}")
     else:
         typer.echo(f"  Platform '{system}' has no automated trust-store check.")
 
