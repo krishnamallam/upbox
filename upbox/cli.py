@@ -45,11 +45,27 @@ def start(
     proxy_port: int = typer.Option(8888, help="Proxy port to listen on."),
     dashboard_port: int = typer.Option(8800, help="Dashboard port to listen on."),
 ) -> None:
-    """Start the proxy and dashboard."""
-    typer.echo("Not implemented yet — coming in Day 3 (capture) and Day 5 (dashboard).")
-    typer.echo(f"  Planned proxy:     http://127.0.0.1:{proxy_port}")
-    typer.echo(f"  Planned dashboard: http://127.0.0.1:{dashboard_port}")
+    """Start the proxy and dashboard (via the Day 5 supervisor).
+
+    For now, while the supervisor is unimplemented, run the two commands
+    in separate terminals: ``upbox proxy`` and ``upbox dashboard``.
+    """
+    typer.echo("Supervisor not implemented yet — coming in Day 5.")
+    typer.echo("For now, in separate terminals run:")
+    typer.echo(f"  upbox proxy --port {proxy_port}")
+    typer.echo(f"  upbox dashboard --port {dashboard_port}   # Day 5")
     raise typer.Exit(code=1)
+
+
+@app.command()
+def proxy(
+    host: str = typer.Option("127.0.0.1", help="Proxy bind host."),
+    port: int = typer.Option(8888, help="Proxy port to listen on."),
+) -> None:
+    """Run the upbox proxy (mitmproxy + capture addon). Blocks until Ctrl+C."""
+    from upbox import proxy as proxy_module
+
+    proxy_module.run(host=host, port=port)
 
 
 @app.command()

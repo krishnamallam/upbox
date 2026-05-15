@@ -170,3 +170,22 @@ def test_install_then_uninstall_linux_nss_round_trips(tmp_ca_dir: Path, tmp_nss_
     removed = not ca.is_in_linux_nss(nss_db=tmp_nss_db)
 
     assert installed and removed
+
+
+def test_write_mitmproxy_bundle_contains_both_key_and_cert(
+    tmp_ca_dir: Path, tmp_path: Path
+) -> None:
+    ca.generate_ca(tmp_ca_dir)
+    confdir = tmp_path / "mitm"
+
+    ca.write_mitmproxy_bundle(tmp_ca_dir, confdir)
+    bundle = (confdir / ca.MITM_CA_FILENAME).read_bytes()
+    cert_alone = (tmp_ca_dir / ca.CA_CERT_FILENAME).read_bytes()
+    key_alone = (tmp_ca_dir / ca.CA_KEY_FILENAME).read_bytes()
+
+    assert key_alone in bundle and cert_alone in bundle
+
+
+def test_write_mitmproxy_bundle_raises_when_ca_missing(tmp_ca_dir: Path, tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        ca.write_mitmproxy_bundle(tmp_ca_dir, tmp_path / "mitm")
