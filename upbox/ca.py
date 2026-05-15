@@ -47,6 +47,9 @@ NSS_NICKNAME = "upbox-ca"
 
 MACOS_KEYCHAIN = "/Library/Keychains/System.keychain"
 
+DEFAULT_MITM_CONFDIR = Path.home() / ".upbox" / "mitm"
+MITM_CA_FILENAME = "mitmproxy-ca.pem"
+
 
 @dataclass(frozen=True)
 class CAStatus:
@@ -356,3 +359,30 @@ def _nss_db_path(nss_db: str) -> Path:
     if nss_db.startswith("sql:"):
         return Path(nss_db[len("sql:") :])
     return Path(nss_db)
+
+
+def write_mitmproxy_bundle(
+    ca_dir: Path = DEFAULT_CA_DIR,
+    confdir: Path = DEFAULT_MITM_CONFDIR,
+) -> Path:
+    """Write the combined-PEM (key + cert) that mitmproxy reads at startup.
+
+    mitmproxy expects ``<confdir>/mitmproxy-ca.pem`` to contain both the
+    private key and the certificate concatenated. Pointing it at a confdir
+    we own (not ``~/.mitmproxy``) avoids stepping on a user's existing
+    mitmproxy install.
+
+    Returns the confdir path; pass it to ``Options(confdir=str(<path>))``.
+    """
+    cert = cert_path(ca_dir)
+    key = key_path(ca_dir)
+    if not (cert.exists() and key.exists()):
+        raise FileNotFoundError(f"upbox CA not found in {ca_dir}. Run `upbox init` first.")
+
+    confdir.mkdir(parents=True, exist_ok=True)
+    confdir.chmod(0o700)
+
+    bundle = confdir / MITM_CA_FILENAME
+    bundle.write_bytes(key.read_bytes() + b"\n" + cert.read_bytes())
+    bundle.chmod(0o600)
+    return confdir
