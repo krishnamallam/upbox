@@ -17,7 +17,9 @@ from mitmproxy.tools.dump import DumpMaster
 
 from upbox import ca
 from upbox.addons.capture import CaptureAddon
+from upbox.addons.enforce import EnforceAddon
 from upbox.addons.fingerprint import FingerprintAddon
+from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
 
 log = logging.getLogger(__name__)
@@ -39,8 +41,16 @@ async def _run(host: str, port: int) -> None:
     master = DumpMaster(opts)
 
     store = Store()
-    # Fingerprint runs on the request hook so capture (response hook) sees the tag.
-    master.addons.add(FingerprintAddon(), CaptureAddon(store))  # type: ignore[no-untyped-call]
+    # Order matters: fingerprint tags the tool, enforce checks the destination
+    # (and may short-circuit with a 403), redact rewrites the body, then
+    # capture (response hook) persists the final state including
+    # block/redaction metadata.
+    master.addons.add(  # type: ignore[no-untyped-call]
+        FingerprintAddon(),
+        EnforceAddon(),
+        RedactAddon(),
+        CaptureAddon(store),
+    )
 
     log.info("upbox proxy listening on %s:%d", host, port)
     try:
