@@ -1,0 +1,27 @@
+# Default redaction patterns. Applied before upbox forwards the request,
+# so secrets never reach the cloud LLM.
+#
+# `pattern` is a Python regex. `replace` is the literal string to substitute
+# in place of each match. `multiline` enables MULTILINE mode for the dotenv
+# pattern so it matches per-line.
+
+- name: aws-access-key
+  pattern: "AKIA[0-9A-Z]{16}"
+  replace: "[REDACTED:aws-access-key]"
+
+- name: openai-key
+  pattern: "sk-[A-Za-z0-9]{32,}"
+  replace: "[REDACTED:openai-key]"
+
+- name: anthropic-key
+  pattern: "sk-ant-[A-Za-z0-9-]{32,}"
+  replace: "[REDACTED:anthropic-key]"
+
+- name: github-token
+  pattern: "ghp_[A-Za-z0-9]{36}"
+  replace: "[REDACTED:github-token]"
+
+- name: dotenv-block
+  pattern: "^[A-Z_][A-Z0-9_]*=.+$"
+  multiline: true
+  replace: "[REDACTED:env-var]"

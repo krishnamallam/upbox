@@ -1,0 +1,37 @@
+# Per-tool destination policy. The lookup key matches the tool name set by
+# the fingerprint addon (upbox/rules/tools.yaml). The special "default"
+# entry applies to any flow whose tool is None or not listed.
+#
+# `allow` is an exact-or-subdomain list of hostnames. Any host outside the
+# list is treated according to `block_unknown`:
+#   warn  — capture the request, mark blocked=1 for the dashboard, but
+#           forward it anyway so the user's tool doesn't break.
+#   block — short-circuit with HTTP 403; never reach the upstream host.
+
+Cursor:
+  allow: [api.cursor.sh, api2.cursor.sh]
+  block_unknown: warn
+
+Claude Code:
+  allow: [api.anthropic.com]
+  block_unknown: warn
+
+Claude Desktop:
+  allow: [api.anthropic.com]
+  block_unknown: warn
+
+GitHub Copilot:
+  allow: [api.githubcopilot.com, copilot-proxy.githubusercontent.com]
+  block_unknown: warn
+
+ChatGPT:
+  allow: [chat.openai.com, chatgpt.com]
+  block_unknown: warn
+
+Codeium:
+  allow: [server.codeium.com]
+  block_unknown: warn
+
+default:
+  allow: []
+  block_unknown: warn

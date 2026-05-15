@@ -53,6 +53,10 @@ class CaptureAddon:
             headers_json=json.dumps(dict(req.headers.items())),  # type: ignore[no-untyped-call]
             body_excerpt=truncate_body_excerpt(body),
             body_hash=hashlib.sha256(body).hexdigest() if body else None,
-            redactions_applied_json=None,  # Filled in by redact addon on Day 7.
-            blocked=0,  # Set by enforce addon on Day 8.
+            redactions_applied_json=(
+                json.dumps(flow.metadata["upbox_redactions"])
+                if "upbox_redactions" in flow.metadata
+                else None
+            ),
+            blocked=1 if flow.metadata.get("upbox_blocked") else 0,
         )
