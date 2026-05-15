@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}upbox{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><strong>upbox</strong> <span class="muted">local proxy audit</span></div>
+    <div class="muted small">127.0.0.1 · local-only</div>
+  </header>
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

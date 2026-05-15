@@ -45,16 +45,11 @@ def start(
     proxy_port: int = typer.Option(8888, help="Proxy port to listen on."),
     dashboard_port: int = typer.Option(8800, help="Dashboard port to listen on."),
 ) -> None:
-    """Start the proxy and dashboard (via the Day 5 supervisor).
+    """Start the proxy and dashboard together (supervisor). Blocks until Ctrl+C."""
+    from upbox import supervisor
 
-    For now, while the supervisor is unimplemented, run the two commands
-    in separate terminals: ``upbox proxy`` and ``upbox dashboard``.
-    """
-    typer.echo("Supervisor not implemented yet — coming in Day 5.")
-    typer.echo("For now, in separate terminals run:")
-    typer.echo(f"  upbox proxy --port {proxy_port}")
-    typer.echo(f"  upbox dashboard --port {dashboard_port}   # Day 5")
-    raise typer.Exit(code=1)
+    rc = supervisor.run(proxy_port=proxy_port, dashboard_port=dashboard_port)
+    raise typer.Exit(code=rc)
 
 
 @app.command()
@@ -66,6 +61,17 @@ def proxy(
     from upbox import proxy as proxy_module
 
     proxy_module.run(host=host, port=port)
+
+
+@app.command()
+def dashboard(
+    host: str = typer.Option("127.0.0.1", help="Dashboard bind host (loopback only)."),
+    port: int = typer.Option(8800, help="Dashboard port to listen on."),
+) -> None:
+    """Run the upbox dashboard (FastAPI on 127.0.0.1). Blocks until Ctrl+C."""
+    from upbox.dashboard import app as dashboard_app
+
+    dashboard_app.run(host=host, port=port)
 
 
 @app.command()
