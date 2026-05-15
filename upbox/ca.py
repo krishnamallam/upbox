@@ -50,6 +50,8 @@ MACOS_KEYCHAIN = "/Library/Keychains/System.keychain"
 DEFAULT_MITM_CONFDIR = Path.home() / ".upbox" / "mitm"
 MITM_CA_FILENAME = "mitmproxy-ca.pem"
 
+WINDOWS_CERT_STORE = "Root"  # Trusted Root Certification Authorities
+
 
 @dataclass(frozen=True)
 class CAStatus:
@@ -65,6 +67,7 @@ class CAStatus:
     in_linux_system_trust: bool | None
     in_linux_nss: bool | None
     nss_certutil_available: bool | None
+    in_windows_trust: bool | None
 
 
 def cert_path(ca_dir: Path = DEFAULT_CA_DIR) -> Path:
@@ -274,6 +277,36 @@ def is_in_linux_nss(nss_db: str = DEFAULT_NSS_DB) -> bool | None:
     return result.returncode == 0
 
 
+def install_windows(cert: Path) -> None:
+    """Install the CA to the Windows per-user Trusted Root store.
+
+    Per-user (``-user``) doesn't need admin rights and is what Electron
+    apps' NodeJS runtime checks via their bundled-then-OS lookup. The
+    LocalMachine store would also work but requires elevation.
+    """
+    subprocess.run(
+        ["certutil", "-user", "-addstore", "-f", WINDOWS_CERT_STORE, str(cert)],
+        check=True,
+    )
+
+
+def uninstall_windows() -> None:
+    """Remove the upbox CA from the Windows per-user Trusted Root store."""
+    subprocess.run(
+        ["certutil", "-user", "-delstore", WINDOWS_CERT_STORE, CA_COMMON_NAME],
+        check=True,
+    )
+
+
+def is_in_windows_trust() -> bool:
+    """Return True if the upbox CA is registered in the Windows per-user Root store."""
+    result = subprocess.run(
+        ["certutil", "-user", "-store", WINDOWS_CERT_STORE, CA_COMMON_NAME],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def get_status(ca_dir: Path = DEFAULT_CA_DIR, nss_db: str = DEFAULT_NSS_DB) -> CAStatus:
     """Doctor check: does the CA exist on disk, and is each trust layer wired?"""
     cert = cert_path(ca_dir)
@@ -287,6 +320,7 @@ def get_status(ca_dir: Path = DEFAULT_CA_DIR, nss_db: str = DEFAULT_NSS_DB) -> C
         nss_certutil_available=(
             shutil.which("certutil") is not None if system == "Linux" else None
         ),
+        in_windows_trust=is_in_windows_trust() if system == "Windows" else None,
     )
 
 
@@ -319,8 +353,12 @@ def install_all(ca_dir: Path = DEFAULT_CA_DIR, nss_db: str = DEFAULT_NSS_DB) -> 
             print("       Debian/Ubuntu: sudo apt install libnss3-tools")
             print("       Fedora:        sudo dnf install nss-tools")
     elif system == "Windows":
-        print("[WARN] Auto-install on Windows is not yet supported (planned for v0.2).")
-        print(f"       Double-click {cert} and import to 'Trusted Root Certification Authorities'.")
+        try:
+            install_windows(cert)
+            print("[OK] Installed to Windows per-user Trusted Root store")
+        except subprocess.CalledProcessError:
+            print("[ERR] certutil failed. Try opening an Administrator shell, or import")
+            print(f"      {cert} manually into 'Trusted Root Certification Authorities'.")
     else:
         print(f"[WARN] Unsupported platform: {system}. Cert generated at {cert}.")
 
@@ -349,6 +387,12 @@ def uninstall_all(ca_dir: Path = DEFAULT_CA_DIR, nss_db: str = DEFAULT_NSS_DB) -
             print("[OK] Removed from Linux NSS db")
         else:
             print("[WARN] Could not remove from NSS db (not installed or certutil missing)")
+    elif system == "Windows":
+        try:
+            uninstall_windows()
+            print("[OK] Removed from Windows per-user Trusted Root store")
+        except subprocess.CalledProcessError:
+            print("[WARN] Could not remove from Windows trust store (not installed?)")
 
     print()
     print(f"Files in {ca_dir} were not deleted. Remove them manually to wipe the CA.")

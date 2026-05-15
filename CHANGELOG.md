@@ -8,10 +8,11 @@ proxy, dashboard, redaction, per-tool allowlist, audit-log export.
 ### Added
 
 - **CA management** — `upbox init` generates a local RSA-2048 CA and
-  installs to platform trust stores (macOS System keychain; Linux
-  system trust + NSS + `NODE_EXTRA_CA_CERTS` hints). `upbox init
-  --uninstall` reverses every layer. `upbox status` reports trust per
-  layer.
+  installs to platform trust stores: macOS System keychain; Linux
+  system trust + NSS + `NODE_EXTRA_CA_CERTS` hints; Windows per-user
+  Trusted Root store via `certutil -user -addstore` (no admin
+  required). `upbox init --uninstall` reverses every layer.
+  `upbox status` reports trust per layer.
 - **Capture** — mitmproxy-based proxy persists every flow to SQLite
   (WAL mode). Body excerpt capped at 4 KB; `body_hash` records SHA-256
   of the full body.
@@ -62,4 +63,4 @@ dashboard route smoke, supervisor child-death handling.
 - Team mode (LAN-local central dashboard, multiple endpoints).
 - Configurable retention.
 - Live-reload of rule files (currently requires restart).
-- Auto-CA-install on Windows.
+- Firefox NSS install on Windows (currently manual).

@@ -101,6 +101,8 @@ def status() -> None:
             typer.echo("  Linux NSS:             SKIPPED (install libnss3-tools or nss-tools)")
         else:
             typer.echo(f"  Linux NSS:             {_yn(s.in_linux_nss)}")
+    elif system == "Windows":
+        typer.echo(f"  Windows Root store:    {_yn(s.in_windows_trust)}")
     else:
         typer.echo(f"  Platform '{system}' has no automated trust-store check.")
 
@@ -153,6 +155,8 @@ def export(
         if output == "-":
             written = _write(sys.stdout, rows)
         else:
-            with Path(output).open("w", encoding="utf-8") as sink:
+            # newline="" is required by the csv module to avoid double line
+            # endings on Windows (and is harmless for JSONL).
+            with Path(output).open("w", encoding="utf-8", newline="") as sink:
                 written = _write(sink, rows)
             typer.echo(f"wrote {written} rows to {output}")

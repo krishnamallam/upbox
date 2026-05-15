@@ -85,13 +85,41 @@ Most Electron apps respect this on launch.
 
 ## Windows
 
-Auto-install is **not yet supported** in v0.1 (planned for v0.2). For
-now, double-click `~/.upbox/ca/upbox-ca.pem` (or use `certutil -addstore`)
-to import the CA into **Trusted Root Certification Authorities**.
+```powershell
+upbox init
+```
+
+This installs the CA to the Windows **per-user** Trusted Root
+Certification Authorities store via `certutil -user -addstore`. No
+admin rights needed — the install affects the current user only,
+which is what Electron apps and most user-mode HTTPS clients read
+from.
+
+Verify with:
+
+```powershell
+upbox status
+# CA trust status:
+#   Cert generated:        YES
+#   Windows Root store:    YES
+```
+
+For machine-wide install (every user on the box), run an elevated
+shell and use the LocalMachine store directly:
 
 ```powershell
 certutil -addstore -f "Root" "$env:USERPROFILE\.upbox\ca\upbox-ca.pem"
 ```
+
+(The upbox CLI doesn't elevate itself; this is intentional — no
+silent admin prompts.)
+
+### Firefox on Windows
+
+Firefox uses its own NSS database independent of the Windows store.
+`upbox` doesn't write to it yet on Windows; trust the CA in Firefox
+manually via Settings → Privacy & Security → Certificates → View
+Certificates → Authorities → Import.
 
 ## Uninstalling
 

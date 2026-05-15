@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,10 @@ def test_generate_ca_marks_certificate_as_ca(tmp_ca_dir: Path) -> None:
     assert bc.ca is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX mode bits don't apply on Windows (NTFS uses ACLs)",
+)
 def test_generate_ca_key_has_mode_0600(tmp_ca_dir: Path) -> None:
     _, key = ca.generate_ca(tmp_ca_dir)
     mode = stat.S_IMODE(key.stat().st_mode)
@@ -161,7 +166,10 @@ def test_uninstall_macos_invokes_security_delete_certificate(
     assert captured[0][:4] == ["sudo", "security", "delete-certificate", "-c"]
 
 
-@pytest.mark.skipif(shutil.which("certutil") is None, reason="certutil not available")
+@pytest.mark.skipif(
+    shutil.which("certutil") is None or sys.platform == "win32",
+    reason="NSS certutil not available (Windows ships its own unrelated certutil.exe)",
+)
 def test_install_then_uninstall_linux_nss_round_trips(tmp_ca_dir: Path, tmp_nss_db: str) -> None:
     cert, _ = ca.generate_ca(tmp_ca_dir)
     ca.install_linux_nss(cert, nss_db=tmp_nss_db)
