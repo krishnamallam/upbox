@@ -1,12 +1,16 @@
 """upbox CLI.
 
-Day 1 ships stubs only — each command exits non-zero with a pointer to the
-day it lands. See ``PLAN.md`` for the 14-day build schedule.
+Day 2 wires ``init`` and ``status``. Other commands stay stubbed until their day.
+See ``PLAN.md`` for the 14-day build schedule.
 """
 
 from __future__ import annotations
 
+import platform
+
 import typer
+
+from upbox import ca
 
 app = typer.Typer(
     name="upbox",
@@ -17,10 +21,23 @@ app = typer.Typer(
 
 
 @app.command()
-def init() -> None:
-    """Generate and install the local CA into the system trust store."""
-    typer.echo("Not implemented yet — coming in Day 2 (Local CA).")
-    raise typer.Exit(code=1)
+def init(
+    uninstall: bool = typer.Option(
+        False,
+        "--uninstall",
+        help="Remove the upbox CA from every trust store it was installed into.",
+    ),
+) -> None:
+    """Generate and install the local CA into platform trust stores.
+
+    On Linux, installs to system trust (``update-ca-certificates``), NSS
+    (``certutil`` if available), and prints ``NODE_EXTRA_CA_CERTS`` hints for
+    known Electron apps. On macOS, installs to the System keychain.
+    """
+    if uninstall:
+        ca.uninstall_all()
+        return
+    ca.install_all()
 
 
 @app.command()
@@ -44,9 +61,39 @@ def stop() -> None:
 
 @app.command()
 def status() -> None:
-    """Show whether the proxy is running and how many requests it has captured."""
-    typer.echo("Not implemented yet.")
-    raise typer.Exit(code=1)
+    """Report CA trust per layer, plus proxy and dashboard liveness.
+
+    Day 2 covers CA layers; proxy and dashboard checks fill in on Days 3 and 5.
+    """
+    s = ca.get_status()
+    system = platform.system()
+
+    typer.echo("CA trust status:")
+    typer.echo(f"  Cert generated:        {_yn(s.cert_exists)} ({s.cert_path})")
+
+    if system == "Darwin":
+        typer.echo(f"  macOS System keychain: {_yn(s.in_macos_keychain)}")
+    elif system == "Linux":
+        typer.echo(f"  Linux system trust:    {_yn(s.in_linux_system_trust)}")
+        if s.nss_certutil_available is False:
+            typer.echo("  Linux NSS:             SKIPPED (install libnss3-tools or nss-tools)")
+        else:
+            typer.echo(f"  Linux NSS:             {_yn(s.in_linux_nss)}")
+    else:
+        typer.echo(f"  Platform '{system}' has no automated trust-store check.")
+
+    typer.echo("")
+    typer.echo("Proxy + dashboard liveness: coming Days 3 and 5.")
+
+    if s.cert_exists:
+        typer.echo("")
+        typer.echo(ca.electron_app_hint())
+
+
+def _yn(value: bool | None) -> str:
+    if value is None:
+        return "N/A"
+    return "YES" if value else "NO"
 
 
 @app.command()

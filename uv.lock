@@ -1330,6 +1330,7 @@ name = "upbox"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "mitmproxy" },
@@ -1349,6 +1350,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "mitmproxy", specifier = ">=11.0" },
