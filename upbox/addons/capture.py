@@ -42,7 +42,7 @@ class CaptureAddon:
         body = req.content or b""
         return RequestRecord(
             ts=datetime.now(UTC).isoformat(),
-            tool=None,  # Filled in by fingerprint addon on Day 4.
+            tool=flow.metadata.get("upbox_tool"),
             method=req.method,
             scheme=req.scheme,
             host=req.host,
