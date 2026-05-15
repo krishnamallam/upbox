@@ -1,10 +1,12 @@
 # upbox — execution plan
 
+**Vision:** Wireshark for AI tools. One capture engine, many lenses (compliance, cost, prompt history, security, tool inventory, quality, debug replay). See `README.md` for the full lens roadmap. v0.1 ships the **foundation plus one lens** (live feed). Every later lens is a ~1-week sprint that reuses the same capture engine and storage.
+
 **Goal:** ship `v0.1.0` by **15 July 2026**.
 
-**Why that date:** EU AI Act full obligations begin **2 August 2026**. The 18-day window between launch and enforcement is the trend tailwind. Arrive early, not on the day.
+**Why that date:** EU AI Act full obligations begin **2 August 2026** and v0.2 (compliance lens) lands on enforcement eve. But v0.1 has to come first — and the foundation is what makes everything after v0.2 possible. The 18-day window is also the trend tailwind for the v0.2 launch.
 
-**Scope discipline:** v0.1 exists to make one screenshot real — the dashboard showing "Cursor sent N kB of code to M domains in the last 30 seconds." If a feature does not serve that screenshot, it is roadmap, not v0.1.
+**Scope discipline:** v0.1 ships the *capture engine* and the *live feed lens*. Nothing else. Every feature must answer either "is this part of capturing AI traffic?" or "is this part of the live feed?" Compliance exports, cost tracking, history search — all roadmap, not v0.1. The lens architecture is what lets them ship later as 1-week sprints.
 
 ---
 
@@ -18,6 +20,7 @@
 | DB | `sqlite3` stdlib + WAL | Schema is small. No ORM tax. |
 | Web framework | `FastAPI` | Async, typed, fast. |
 | Frontend | HTMX + Pico.css | No build step. No JS framework. Ships in days. |
+| Dashboard pattern | Lens-routed (`/lens/{name}/...`) | One shell, many views. Adding a lens = new route + template + queries. No dashboard rewrite per feature. |
 | CLI | `typer` | Type-hinted, autocomplete, ergonomic. |
 | Config | YAML, editable from UI | Edit in editor or in browser, same source of truth. |
 | Tests | pytest + pytest-asyncio | Standard. |
@@ -68,12 +71,15 @@ upbox/
 │   ├── dashboard/
 │   │   ├── __init__.py
 │   │   ├── app.py                       # FastAPI app
-│   │   ├── routes.py
+│   │   ├── lenses.py                    # lens registry (name → template dir + handler)
+│   │   ├── routes.py                    # /lens/{name}/... dispatch
 │   │   ├── templates/
-│   │   │   ├── base.html
-│   │   │   ├── index.html
-│   │   │   ├── request.html
-│   │   │   └── partials/
+│   │   │   ├── base.html                # shell with lens picker in nav
+│   │   │   ├── lenses/
+│   │   │   │   └── live/                # live feed lens (only one in v0.1)
+│   │   │   │       ├── index.html
+│   │   │   │       ├── request.html
+│   │   │   │       └── partials/
 │   │   └── static/
 │   │       ├── pico.css
 │   │       └── htmx.min.js
@@ -201,16 +207,19 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 - Tests: synthetic flow per tool → correct classification.
 - Commit: `feat(fingerprint): classify flows by AI tool`.
 
-### Day 5 — Dashboard skeleton
+### Day 5 — Lens-aware dashboard + live feed lens
 
-**Outcome:** `http://127.0.0.1:8800/` shows a live feed of requests.
+**Outcome:** `http://127.0.0.1:8800/lens/live` shows a live feed of requests. The dashboard is lens-aware from day one — adding lenses in v0.2+ requires no dashboard rewrite.
 
 - `upbox/dashboard/app.py`: FastAPI mount; lifespan hook starts mitmproxy in a background thread.
-- `templates/base.html`: shell with Pico.css.
-- `templates/index.html`: per-tool tiles (count + bytes) + scrolling request list.
-- HTMX polls `/requests/recent` every 2 seconds.
-- `routes.py`: `GET /` (full page), `GET /requests/recent` (partial).
-- Commit: `feat(dashboard): live request feed`.
+- `upbox/dashboard/lenses.py`: lens registry. A lens is a name + template directory + dict of route handlers. Live feed is the only lens registered in v0.1.
+- `templates/base.html`: shell with Pico.css + lens picker in the nav (only "Live feed" enabled).
+- `templates/lenses/live/index.html`: per-tool tiles (count + bytes) + scrolling request list.
+- HTMX polls `/lens/live/recent` every 2 seconds.
+- `routes.py`: `GET /` redirects to default lens (`/lens/live`); `GET /lens/{name}/...` dispatches to the lens handler.
+- Commit: `feat(dashboard): lens-aware shell + live feed lens`.
+
+**Why this matters:** the compliance, cost, history, security, tool-inventory, quality, and debug-replay lenses all plug into this exact shell post-v0.1. Each future lens is a new directory under `templates/lenses/` plus a handler in the registry. The capture engine never changes.
 
 ### Day 6 — Request detail
 
@@ -334,36 +343,88 @@ Trunk-based. One commit minimum per day. No long-lived branches. CI passes befor
 
 ---
 
-## v0.2 sprint — the compliance arc
+## Post-v0.1 lens roadmap
 
-**Target:** **1 August 2026** (eve of EU AI Act enforcement).
+Each lens is a ~1-week sprint. The capture engine and storage from v0.1 don't change. A new lens = one directory under `templates/lenses/` + a handler in the registry + lens-specific queries on the existing audit-log schema.
 
-Same codebase. New features that unlock the second viral moment.
+Dates after v0.2 are intentions, not commitments. Early-adopter signal decides the order.
 
-- **AI Act Article 26 export format.** If the EU publishes a canonical schema, conform. Otherwise ship a best-effort schema covering everything a deployer needs to log.
-- **Tamper-evident hash chain** on the audit log (each row hashes the previous row's hash → any tampering breaks the chain).
-- **Encrypted-at-rest SQLite** (sqlcipher or app-layer encryption — decide at the time).
-- **Team mode.** Multiple endpoints reporting to one dashboard, LAN-local. Still no cloud.
-- **Better Windows experience** (auto CA install).
-- **Configurable retention policies** (auto-purge after N days, by tool, by host).
+### v0.2 — Compliance lens (target: 1 August 2026, eve of EU AI Act enforcement)
+- Routes: `/lens/compliance/`, `/lens/compliance/eu-ai-act`, `/lens/compliance/gdpr`, `/lens/compliance/soc2`
+- Export formats: EU AI Act Article 26 schema (or best-effort if EU has not published a canonical one), GDPR Article 5 data minimisation report, SOC 2 CC6.1 / CC7.2 access log, ISO 27001 A.5.30 logs
+- Tamper-evident hash chain on the audit log (each row hashes the previous row's hash; tampering breaks the chain)
+- Encrypted-at-rest SQLite (sqlcipher or app-layer encryption)
+- Configurable retention policies (auto-purge after N days, by tool, by host)
+
+### v0.3 — Cost lens (target: mid–late August 2026)
+- Routes: `/lens/cost/`, `/lens/cost/by-tool`, `/lens/cost/by-model`, `/lens/cost/alerts`
+- Per-request token estimation (input + output tokens from OpenAI / Anthropic / Google response bodies)
+- Pricing table for known models, refreshed quarterly via PR
+- Daily / weekly / monthly spend by tool, model, and detected repo
+- Budget alerts (configurable threshold per tool)
+
+### v0.4 — Prompt history lens (target: September 2026)
+- Routes: `/lens/history/`, `/lens/history/search`
+- Full-text search over prompts and responses (SQLite FTS5)
+- Filters by tool, time range, host, detected repo
+- "What did I ask Cursor about Postgres last Tuesday?" → full thread reconstruction
+
+### v0.5 — Security lens (target: September–October 2026)
+- Routes: `/lens/security/`, `/lens/security/secrets`, `/lens/security/egress`
+- Built on the redaction engine's detections — surfaces what was redacted, when, from where
+- Anomaly alerts: tool calling a domain not in its allowlist, request body 10× baseline, etc.
+- Source-code egress flags: prompts containing recognisable code patterns from your repos
+
+### v0.6 — Tool inventory lens (target: October 2026)
+- Routes: `/lens/tools/`, `/lens/tools/discovered`
+- Auto-discovery: shows AI tools that have called known LLM hosts even before they are configured as fingerprints
+- Active vs. dormant tools, last seen, frequency
+- Team mode (v1.0 prerequisite): roll up multiple endpoints to one inventory
+
+### v0.7 — Quality / fine-tuning lens (target: November 2026)
+- Routes: `/lens/quality/`, `/lens/quality/curate`
+- Mark interactions as good / bad / interesting
+- Export curated sets as JSONL for OpenAI / Hugging Face / Axolotl fine-tuning formats
+- Quality signals: response length, follow-up patterns, deletion patterns from the editor (if reachable)
+
+### v0.8 — Debug replay lens (target: December 2026)
+- Routes: `/lens/debug/`, `/lens/debug/replay`
+- Re-issue a captured request to the live API (or to a different model) and diff responses
+- Bisect mode: replay the same request 10× to see response variance
+- Useful when an AI tool "used to work" and now doesn't
+
+### v1.0 — platform graduation (target: early 2027)
+- Plugin SDK locked: third parties ship lenses as installable packages
+- macOS menu-bar app, Windows tray app
+- Enterprise team mode (LAN-local central dashboard with auth — still no cloud)
+- Browser extension companion for web-only AI tools (ChatGPT web, Claude web, Gemini web)
+- Better Windows experience (auto CA install)
 
 ---
 
-## Two-arc launch narrative
+## Launch narrative — eight viral arcs from one codebase
 
-**Arc 1 — Day 14: personal paranoia angle.**
+The lens model isn't just an engineering pattern — it's a sustained-launch strategy. Each lens is its own launch moment, its own audience, its own narrative.
 
-> "I just installed upbox and watched Cursor send 4,200 lines of my private repo to 3 different domains in 30 seconds. Here's the dashboard. It's open source and runs entirely on your machine."
+**Arc 1 — v0.1, Day 14: personal paranoia.**
+
+> "I just installed upbox and watched Cursor send 4,200 lines of my private repo to 3 different domains in 30 seconds. Here's the dashboard. Open source, runs entirely on your machine."
 >
-> HN: *Upbox — See what your AI tools are actually sending*.
+> HN: *Upbox — Wireshark for your AI tools*.
 
-**Arc 2 — ~Day 75: compliance angle, eve of EU AI Act enforcement (1 Aug 2026).**
+**Arc 2 — v0.2, eve of EU AI Act enforcement (1 Aug 2026): compliance.**
 
-> "Upbox v0.2 is out. You can now export every AI request as a tamper-evident audit log mapped to EU AI Act Article 26. The deadline is tomorrow. The tool is free."
+> "Upbox v0.2 ships the compliance lens. Export every AI request as a tamper-evident audit log against EU AI Act Article 26, GDPR Article 5, SOC 2 CC6.1, ISO 27001 A.5.30. The deadline is tomorrow."
 >
-> HN: *Upbox v0.2 — Endpoint-level AI logging for EU AI Act Article 26*.
+> HN: *Upbox v0.2 — Endpoint AI logging for AI Act, GDPR, SOC 2, ISO 27001*.
 
-Two viral moments from one codebase. Arc 1 lands among devs. Arc 2 lands among security teams and compliance officers. Different audiences, different platforms, additive — not the same launch twice.
+**Arc 3 — v0.3: cost.**
+
+> "I ran upbox for a week and discovered I was spending $340/month on Cursor's o1 calls without realising. The cost lens is live."
+
+**Arc 4–8** — prompt history, security, tool inventory, quality, debug replay. Each one has its own audience, its own headline, its own viral hook.
+
+Eight arcs over six months. Same codebase. The lens architecture is the launch strategy.
 
 ---
 

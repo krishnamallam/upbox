@@ -15,9 +15,10 @@ uv run upbox start                      # proxy + dashboard
 
 ## Key Decisions
 
+- **Wireshark for AI tools.** One capture engine, many lenses. v0.1 ships the foundation + live feed lens; later lenses (compliance, cost, history, security, etc.) plug into the same shell.
 - **mitmproxy as the proxy core** (MIT). Use its addon API; never fork.
 - **SQLite via stdlib `sqlite3` in WAL mode**. No ORM, schema is small.
-- **HTMX + Pico.css, no build step**. Dashboard is server-rendered partials.
+- **Lens-routed dashboard** (`/lens/{name}/...`). HTMX + Pico.css. No build step, no JS framework.
 - **`127.0.0.1` only**. The dashboard must never bind a public interface.
 - **No outbound calls from upbox itself** beyond the proxied requests it forwards.
 

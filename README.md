@@ -1,6 +1,6 @@
 # upbox
 
-> See what your AI tools are actually sending.
+> Wireshark for your AI tools. See, audit, and control what they send.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)](#roadmap)
@@ -33,8 +33,27 @@ Install a local CA, point your AI tools at the upbox proxy, then watch.
 - **Inspect bodies.** The actual prompt, the actual file content, the actual headers.
 - **Redact before forwarding.** Regex rules strip `.env` blocks, API keys, and PII patterns *before* the request reaches the cloud.
 - **Domain enforcement.** Allowlist destinations per tool. Block or warn on unknown hosts. See the receipts.
-- **Audit log.** JSON Lines + CSV export. Tamper-evident hash chain. Article-26-friendly fields.
+- **Audit log.** JSON Lines + CSV export. Tamper-evident hash chain.
 - **Local-only.** SQLite on disk. The dashboard binds to `127.0.0.1` only. No outbound calls from upbox itself.
+
+## Vision: one capture engine, many lenses
+
+Every request your AI tools make gets captured locally. *Lenses* render that captured data for different needs:
+
+| Lens | Question it answers | Target |
+|---|---|---|
+| **Live feed** | What are my AI tools doing right now? | v0.1 |
+| **Compliance** | Can I prove what left the endpoint? (EU AI Act, GDPR, SOC 2, ISO 27001) | v0.2 |
+| **Cost** | How much am I spending, per tool, per model, per project? | v0.3 |
+| **Prompt history** | What did I ask Cursor about Postgres last Tuesday? | v0.4 |
+| **Security** | Did anyone leak a secret or source-code? Is a tool calling a host it shouldn't? | v0.5 |
+| **Tool inventory** | Which AI tools is the team actually using, how often? | v0.6 |
+| **Quality / fine-tuning** | Which interactions are good enough to curate as training data? | v0.7 |
+| **Debug replay** | This AI tool used to work, what changed? Replay the exact request. | v0.8 |
+
+Compliance is one of eight uses, not the whole product. The EU AI Act window triggers the first compliance launch — but upbox is built for the next decade of AI in development, not one enforcement deadline.
+
+One capture engine. Many lenses. Each lens is small (~1 week of work) once the foundation exists. A plugin SDK in v1.0 lets the community ship lenses we haven't thought of.
 
 ## Quick start
 
@@ -91,6 +110,8 @@ Single Python process. mitmproxy as the proxy core (MIT-licensed, battle-tested)
 
 ## EU AI Act and GDPR mapping
 
+The EU AI Act window (full enforcement begins 2 August 2026) is what triggers the first compliance launch in v0.2 — but the compliance lens will cover multiple frameworks, not just one. Articles below are the *first* mapping; SOC 2, ISO 27001, and NIS 2 follow in the same lens.
+
 upbox is a deployer-side tool. It does not certify you compliant on its own — but it produces the *evidence and controls* compliance demands:
 
 | Obligation | What upbox provides |
@@ -123,28 +144,37 @@ upbox is not legal advice. Consult counsel for compliance certification.
 
 ## Roadmap
 
-**v0.1 — "first viral screenshot"** (target: 15 July 2026)
+**Foundation: v0.1 — capture engine + live feed lens** (target: 15 July 2026)
 
 - Local CA setup, mitmproxy bootstrap
 - Tool fingerprinting (Cursor, Claude desktop, Copilot, ChatGPT, Codeium)
-- Live dashboard
-- Regex redaction engine
 - SQLite audit log
+- Regex redaction engine
+- Lens-aware dashboard (`/lens/{name}/...`) — ships with the **live feed lens**
 - JSONL + CSV export
 
-**v0.2 — "compliance-ready"** (target: 1 August 2026 — eve of AI Act enforcement)
+The foundation is built so every later lens is a 1-week sprint. No dashboard rewrite, no capture engine changes — just a new route, a template, and a few queries.
 
-- Article 26 audit-log export format
-- Tamper-evident hash chain
-- Encrypted-at-rest SQLite
-- Team mode (central dashboard, multiple endpoints, LAN-local)
+**Lens sprints (each ≈ 1 week after v0.1):**
 
-**v0.3 and beyond**
+| Version | Lens | Target | Why now |
+|---|---|---|---|
+| v0.2 | Compliance | 1 Aug 2026 | EU AI Act full enforcement begins next day |
+| v0.3 | Cost | Aug 2026 | Spend on cloud LLMs is the biggest unmeasured line item in most companies' AI budgets |
+| v0.4 | Prompt history | Sept 2026 | Everyone has lost an answer they got two weeks ago |
+| v0.5 | Security | Sept–Oct 2026 | Source-code egress incidents will keep happening |
+| v0.6 | Tool inventory | Oct 2026 | Enterprise AI governance push — "which tools are even running on our laptops?" |
+| v0.7 | Quality / fine-tuning | Nov 2026 | Open-source fine-tuning workflows need curated data |
+| v0.8 | Debug replay | Dec 2026 | When an AI tool breaks and you have no idea why |
 
-- Plugin SDK for custom tool fingerprints
-- Companion browser extension (for web LLM apps)
+Each version is a launch moment. The targets after v0.2 are intentions, not commitments — early-adopter signal decides the order.
+
+**v1.0 — platform graduation** (target: early 2027)
+
+- Plugin SDK: third parties ship lenses as installable packages
 - macOS menu-bar app, Windows tray app
-- Configurable retention policies, alerting
+- Enterprise team mode (LAN-local central dashboard, still no cloud)
+- Browser extension companion for web-only AI tools
 
 ## Acknowledgements
 
