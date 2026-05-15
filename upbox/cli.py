@@ -121,8 +121,38 @@ def _yn(value: bool | None) -> str:
 @app.command()
 def export(
     fmt: str = typer.Option("jsonl", "--format", help="jsonl or csv."),
-    output: str = typer.Option("-", "-o", help="Output path (- for stdout)."),
+    output: str = typer.Option("-", "-o", help="Output path; - for stdout."),
+    since: str = typer.Option("", help="Only rows with ts >= this ISO timestamp."),
+    until: str = typer.Option("", help="Only rows with ts <= this ISO timestamp."),
+    tool: str = typer.Option("", help="Only rows for this tool name."),
 ) -> None:
     """Export the audit log to JSON Lines or CSV."""
-    typer.echo(f"Not implemented yet — coming in Day 11 (export). format={fmt} output={output}")
-    raise typer.Exit(code=1)
+    import sqlite3
+    import sys
+    from collections.abc import Iterable
+    from pathlib import Path
+    from typing import IO
+
+    from upbox.db.store import Store
+
+    if fmt not in {"jsonl", "csv"}:
+        typer.echo(f"unknown format: {fmt!r} (expected jsonl or csv)", err=True)
+        raise typer.Exit(code=2)
+
+    def _write(sink: IO[str], rows: Iterable[sqlite3.Row]) -> int:
+        if fmt == "jsonl":
+            return store.export_jsonl(sink, rows)
+        return store.export_csv(sink, rows)
+
+    with Store() as store:
+        rows = store.query_filtered(
+            since=since or None,
+            until=until or None,
+            tool=tool or None,
+        )
+        if output == "-":
+            written = _write(sys.stdout, rows)
+        else:
+            with Path(output).open("w", encoding="utf-8") as sink:
+                written = _write(sink, rows)
+            typer.echo(f"wrote {written} rows to {output}")

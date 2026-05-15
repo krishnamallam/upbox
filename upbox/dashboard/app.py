@@ -14,11 +14,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from upbox import settings
 from upbox.db.store import DEFAULT_DB_PATH, Store
 
 
@@ -99,6 +100,39 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
             request,
             "partials/request_detail.html",
             {"row": row, "headers": _parse_headers(row["headers_json"])},
+        )
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "tools_yaml": settings.read_current("tools"),
+                "redact_yaml": settings.read_current("redact"),
+                "allowlist_yaml": settings.read_current("allowlist"),
+                "message": None,
+                "error": None,
+            },
+        )
+
+    @app.post("/settings/{kind}", response_class=HTMLResponse)
+    async def settings_save(
+        request: Request,
+        kind: str,
+        content: str = Form(...),
+    ) -> HTMLResponse:
+        ok, msg = settings.validate_and_write(kind, content)
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "tools_yaml": settings.read_current("tools"),
+                "redact_yaml": settings.read_current("redact"),
+                "allowlist_yaml": settings.read_current("allowlist"),
+                "message": msg if ok else None,
+                "error": None if ok else msg,
+            },
         )
 
     return app
