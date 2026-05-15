@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block main %}
+<div class="settings">
+  <h2>Settings</h2>
+
+  {% if message %}<p class="msg-ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="msg-err">{{ error }}</p>{% endif %}
+
+  <details open class="rules-block">
+    <summary><strong>Redaction patterns</strong> (<code>redact.yaml</code>)</summary>
+    <form method="post" action="/settings/redact">
+      <textarea name="content" rows="14">{{ redact_yaml }}</textarea>
+      <button type="submit">Save</button>
+    </form>
+  </details>
+
+  <details class="rules-block">
+    <summary><strong>Per-tool allowlist</strong> (<code>allowlist.yaml</code>)</summary>
+    <form method="post" action="/settings/allowlist">
+      <textarea name="content" rows="14">{{ allowlist_yaml }}</textarea>
+      <button type="submit">Save</button>
+    </form>
+  </details>
+
+  <details class="rules-block">
+    <summary><strong>Tool fingerprints</strong> (<code>tools.yaml</code>)</summary>
+    <form method="post" action="/settings/tools">
+      <textarea name="content" rows="14">{{ tools_yaml }}</textarea>
+      <button type="submit">Save</button>
+    </form>
+  </details>
+
+  <p class="muted small">Edits write to <code>~/.upbox/rules/</code>. Restart <code>upbox start</code> to apply.</p>
+</div>
+{% endblock %}

@@ -59,10 +59,12 @@ _INSERT_PLACEHOLDERS = ", ".join("?" * 14)
 class Store:
     """SQLite audit-log store. Open is idempotent."""
 
-    def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
-        self.path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(path, isolation_level=None)
+    def __init__(self, path: Path | None = None) -> None:
+        # Resolve at call time so tests can monkeypatch DEFAULT_DB_PATH.
+        resolved = path if path is not None else DEFAULT_DB_PATH
+        self.path = resolved
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(resolved, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._enable_wal()
@@ -118,6 +120,32 @@ class Store:
             (request_id,),
         ).fetchone()
         return cast("sqlite3.Row | None", row)
+
+    def query_filtered(
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        tool: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """Filtered query for export. All filters are AND-combined."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if since:
+            clauses.append("ts >= ?")
+            params.append(since)
+        if until:
+            clauses.append("ts <= ?")
+            params.append(until)
+        if tool:
+            clauses.append("tool = ?")
+            params.append(tool)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        return list(
+            self._conn.execute(
+                f"SELECT * FROM requests {where} ORDER BY id",
+                tuple(params),
+            )
+        )
 
     def per_tool_summary(self) -> list[sqlite3.Row]:
         """Per-tool aggregates for the dashboard tiles."""
