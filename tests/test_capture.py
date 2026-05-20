@@ -31,10 +31,17 @@ def _flow(
     status: int = 200,
     resp_body: bytes = b'{"ok": true}',
 ) -> Any:
-    """Build a real mitmproxy HTTPFlow for the addon to consume."""
+    """Build a real mitmproxy HTTPFlow for the addon to consume.
+
+    Sets ``client_conn.sni`` to ``host`` by default to mirror a well-
+    behaved HTTPS client. Tests that want to exercise the SNI-absent or
+    SNI-different paths override it after construction.
+    """
     req = tutils.treq(method=method.encode(), host=host, path=path.encode(), content=req_body)
     resp = tutils.tresp(status_code=status, content=resp_body)
-    return tflow.tflow(req=req, resp=resp)
+    flow = tflow.tflow(req=req, resp=resp)
+    flow.client_conn.sni = host
+    return flow
 
 
 def test_capture_addon_persists_one_flow(store: Store) -> None:
@@ -52,6 +59,34 @@ def test_capture_addon_records_method_and_host(store: Store) -> None:
     row = store.query_recent()[0]
 
     assert (row["method"], row["host"]) == ("POST", "api.openai.com")
+
+
+def test_capture_addon_prefers_sni_over_request_host(store: Store) -> None:
+    # In LocalMode, flow.request.host is often the raw destination IP.
+    # The hostname is in flow.client_conn.sni for HTTPS. We must record
+    # the SNI so the dashboard shows "api.anthropic.com", not "1.2.3.4",
+    # and so tool fingerprinting (which matches on hostname) works.
+    addon = CaptureAddon(store)
+    flow = _flow(host="1.2.3.4")
+    flow.client_conn.sni = "api.anthropic.com"
+
+    addon.response(flow)
+    row = store.query_recent()[0]
+
+    assert row["host"] == "api.anthropic.com"
+
+
+def test_capture_addon_falls_back_to_ip_without_sni(store: Store) -> None:
+    addon = CaptureAddon(store)
+    flow = _flow(host="1.2.3.4")
+    flow.client_conn.sni = None
+    # Force pretty_host to also return the IP — simulates no Host header.
+    flow.request.host_header = None
+
+    addon.response(flow)
+    row = store.query_recent()[0]
+
+    assert row["host"] == "1.2.3.4"
 
 
 def test_capture_addon_swallows_exceptions(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:

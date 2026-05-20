@@ -16,9 +16,49 @@ Boots:
 - mitmproxy on `127.0.0.1:8888` with LocalMode capture
 - dashboard on `127.0.0.1:8800`
 
+By default, only HTTPS traffic to known AI hosts gets MITM'd (the
+allowlist; see below). Everything else — your browser, Outlook,
+Teams, banking, OS telemetry — passes through untouched.
+
 When you Ctrl+C, the proxy and dashboard shut down and the OS network
 redirector unwinds cleanly — no leftover state, no risk of stranding
 the machine with a dead proxy.
+
+## TLS allowlist (default ON)
+
+upbox derives a TLS allowlist from the `hosts` field of every rule in
+`upbox/rules/tools.yaml` (or `~/.upbox/rules/tools.yaml` if you have
+your own copy). The current shipped list includes:
+
+- `api.anthropic.com`, `chat.openai.com`, `chatgpt.com`,
+  `api.openai.com`, `api.cursor.sh`, `api2.cursor.sh`,
+  `api.githubcopilot.com`, `copilot-proxy.githubusercontent.com`,
+  `server.codeium.com`, `generativelanguage.googleapis.com`
+
+Subdomains of each entry match too — `api.anthropic.com` covers
+`europe.api.anthropic.com` as well.
+
+Adding new AI hosts is a one-line edit to `tools.yaml` (also editable
+via the dashboard's Settings page).
+
+For ad-hoc additions without editing the file:
+
+```sh
+upbox start --allow other-ai-tool.example.com
+upbox start --allow foo.example.com --allow bar.example.com
+```
+
+To disable the allowlist (capture every host, knowing it'll break
+pinned-cert apps):
+
+```sh
+upbox start --no-allowlist
+```
+
+This makes upbox behave like a full transparent proxy. Useful for
+debugging or compliance-scenarios where you need everything captured,
+not just AI traffic. Expect Outlook, Teams, OneDrive, many mobile
+apps, and some banks to stop working until you stop upbox.
 
 ### Admin / root requirement
 

@@ -32,12 +32,14 @@ def run(
     proxy_port: int = 8888,
     dashboard_port: int = 8800,
     capture_spec: str | None = None,
+    use_allowlist: bool = True,
+    extra_allow_hosts: tuple[str, ...] = (),
 ) -> int:
     """Spawn proxy + dashboard, wait until either dies. Returns the dead child's rc.
 
     ``capture_spec`` is forwarded to ``upbox proxy`` as mitmproxy's LocalMode
-    intercept spec. If ``None``, the proxy boots in standard explicit-proxy
-    mode (no OS-level capture).
+    intercept spec. ``use_allowlist`` and ``extra_allow_hosts`` control the
+    TLS allowlist derived from ``tools.yaml``.
     """
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(os.getpid()))
@@ -45,6 +47,10 @@ def run(
     proxy_args = ["proxy", "--port", str(proxy_port)]
     if capture_spec is not None:
         proxy_args.extend(["--capture-spec", capture_spec])
+    if not use_allowlist:
+        proxy_args.append("--no-allowlist")
+    for h in extra_allow_hosts:
+        proxy_args.extend(["--allow", h])
 
     try:
         proxy_proc = _spawn(proxy_args)
