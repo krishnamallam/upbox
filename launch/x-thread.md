@@ -57,7 +57,7 @@ The auditor itself has to be inspectable, so:
 - Dashboard refuses to bind to anything but 127.0.0.1
 - Open source — the only way to trust a tool that watches your AI
 
-<repo URL>
+https://upbox.sh
 
 **Tweet 6 — what's next**
 
@@ -67,4 +67,4 @@ format, tamper-evident hash chain, team mode) lands 1 August.
 If you build with AI tools, install once and run it for a week. The
 first screenshot is usually a surprise.
 
-<repo URL>
+https://upbox.sh

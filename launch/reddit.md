@@ -36,7 +36,7 @@ upbox init
 upbox start
 ```
 
-Repo: <repo URL>
+Repo: https://upbox.sh
 
 Looking for testers, especially Linux folks on Ubuntu with Cursor or
 Claude desktop. The Day-2 setup hits all three Linux cert stores
@@ -66,7 +66,7 @@ keys, .env contents, etc.) before forwarding.
 - Open source, MIT. Because a closed-source privacy tool is itself a
   privacy problem.
 
-Repo: <repo URL>
+Repo: https://upbox.sh
 
 Curious what surprises people on first run. The screenshot is usually
 the marketing campaign — open it for 30 seconds with Cursor active and

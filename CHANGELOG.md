@@ -55,6 +55,22 @@ redact), all four critical redaction tests from the eng-review (JSON,
 gzip, binary skip, malformed JSON), per-tool allowlist policy,
 dashboard route smoke, supervisor child-death handling.
 
+## v0.1.1 — distribution polish (planned ~2 weeks post-v0.1)
+
+- **Native binaries** distributed via GitHub Releases:
+  - Windows: single-file `upbox.exe` (PyInstaller, ~50 MB, no
+    Python needed on the host).
+  - macOS: signed `.dmg` or Homebrew tap formula.
+  - Linux: AppImage (universal across distros).
+- Firefox NSS auto-install on Windows.
+- Live-reload of rule files (currently requires `upbox start` restart).
+
+The `.exe` work is deferred from v0.1.0 because: (a) mitmproxy +
+PyInstaller has known footguns that take iteration to get right, and
+(b) unsigned PyInstaller binaries hit Windows Defender's heuristic
+on roughly 1 in 5 machines — fixing that needs a $300/yr code-signing
+cert that's better acquired calmly than under launch-day pressure.
+
 ## v0.2 — compliance-ready (planned 2026-08-01)
 
 - Article 26 export format (canonical EU schema if published,
@@ -63,5 +79,3 @@ dashboard route smoke, supervisor child-death handling.
 - Encrypted-at-rest SQLite.
 - Team mode (LAN-local central dashboard, multiple endpoints).
 - Configurable retention.
-- Live-reload of rule files (currently requires restart).
-- Firefox NSS install on Windows (currently manual).
