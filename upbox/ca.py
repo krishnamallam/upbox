@@ -325,13 +325,27 @@ def get_status(ca_dir: Path = DEFAULT_CA_DIR, nss_db: str = DEFAULT_NSS_DB) -> C
 
 
 def electron_app_hint(ca_dir: Path = DEFAULT_CA_DIR) -> str:
-    """Shell hint for launching Electron apps so they trust the upbox CA."""
+    """Shell hint for launching AI tools routed through the upbox proxy."""
     cert = cert_path(ca_dir)
+    if platform.system() == "Windows":
+        return (
+            "To route an AI tool through upbox, launch it with `upbox run`:\n"
+            "  upbox run claude       # Claude Desktop\n"
+            "  upbox run cursor       # Cursor\n"
+            "  upbox run code         # VS Code (Copilot, Codeium)\n"
+            "  upbox run chrome       # Chrome (ChatGPT-web, Gemini-web)\n"
+            "  upbox run --list       # full list of supported tools"
+        )
     return (
-        f"For Electron apps (Cursor, Claude desktop, VSCode), launch with:\n"
-        f"  NODE_EXTRA_CA_CERTS={cert} <app>\n"
-        f"Example:\n"
-        f"  NODE_EXTRA_CA_CERTS={cert} cursor"
+        "To route an AI tool through upbox, launch it with `upbox run`:\n"
+        "  upbox run claude       # Claude Desktop\n"
+        "  upbox run cursor       # Cursor\n"
+        "  upbox run code         # VS Code (Copilot, Codeium)\n"
+        "  upbox run chrome       # Chrome (ChatGPT-web, Gemini-web)\n"
+        "  upbox run --list       # full list of supported tools\n"
+        "\n"
+        "Or set the env vars manually for any other tool:\n"
+        f"  HTTPS_PROXY=http://127.0.0.1:8888 NODE_EXTRA_CA_CERTS={cert} <app>"
     )
 
 

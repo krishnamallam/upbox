@@ -75,6 +75,48 @@ def dashboard(
 
 
 @app.command()
+def run(
+    tool: str = typer.Argument(
+        None,
+        help="AI tool to launch (claude, cursor, code, claude-code, chrome).",
+    ),
+    host: str = typer.Option("127.0.0.1", help="Proxy host the child should target."),
+    port: int = typer.Option(8888, help="Proxy port the child should target."),
+    list_tools: bool = typer.Option(False, "--list", "-l", help="List known tools and exit."),
+) -> None:
+    """Launch an AI tool routed through the upbox proxy.
+
+    Sets HTTPS_PROXY + NODE_EXTRA_CA_CERTS on the child process only, so the
+    rest of the system is unaffected. Chrome receives ``--proxy-server`` and
+    a sandboxed user-data-dir instead, since browsers ignore env-var proxies.
+    """
+    from upbox import launchers
+
+    if list_tools:
+        for t in launchers.TOOLS:
+            aliases = ", ".join(t.aliases)
+            typer.echo(f"  {t.name:16s}  aliases: {aliases}")
+        return
+
+    if not tool:
+        typer.echo("Missing tool argument. Try `upbox run --list`.", err=True)
+        raise typer.Exit(code=1)
+
+    selected = launchers.find_tool(tool)
+    if selected is None:
+        known = ", ".join(t.name for t in launchers.TOOLS)
+        typer.echo(f"Unknown tool: {tool}. Known: {known}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        rc = launchers.launch(selected, proxy_host=host, proxy_port=port)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    raise typer.Exit(code=rc)
+
+
+@app.command()
 def stop() -> None:
     """Stop the running proxy and dashboard."""
     typer.echo("Not implemented yet.")
