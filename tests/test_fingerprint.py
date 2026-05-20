@@ -13,7 +13,11 @@ def _flow(host: str = "api.example.com", ua: str = "", extra_headers: dict[str, 
     for k, v in (extra_headers or {}).items():
         headers.append((k.encode(), v.encode()))
     req = tutils.treq(host=host, headers=headers)
-    return tflow.tflow(req=req)
+    flow = tflow.tflow(req=req)
+    # Mirror SNI to host so the well-behaved-HTTPS path runs in tests.
+    # Tests that want to exercise IP-only LocalMode flows override this.
+    flow.client_conn.sni = host
+    return flow
 
 
 def _rule(name: str, **kwargs) -> ToolRule:
@@ -38,6 +42,18 @@ def test_classify_returns_none_when_no_rule_matches() -> None:
 def test_classify_matches_by_host() -> None:
     addon = FingerprintAddon(rules=[_rule("Cursor", hosts=["api.cursor.sh"])])
     flow = _flow(host="api.cursor.sh")
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "Cursor"
+
+
+def test_classify_matches_by_sni_when_host_is_ip() -> None:
+    # LocalMode: client connects to the resolved IP; SNI carries the
+    # hostname. Without SNI fallback this rule would never match.
+    addon = FingerprintAddon(rules=[_rule("Cursor", hosts=["api.cursor.sh"])])
+    flow = _flow(host="44.196.46.125")
+    flow.client_conn.sni = "api.cursor.sh"
 
     addon.request(flow)
 

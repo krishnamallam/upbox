@@ -13,6 +13,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from upbox.addons._hostname import resolve_host
 from upbox.db.store import RequestRecord, Store, truncate_body_excerpt
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class CaptureAddon:
             tool=flow.metadata.get("upbox_tool"),
             method=req.method,
             scheme=req.scheme,
-            host=req.host,
+            host=resolve_host(flow),
             path=req.path,
             req_bytes=len(body),
             resp_bytes=len(resp.content) if resp and resp.content else None,

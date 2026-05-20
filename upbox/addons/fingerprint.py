@@ -90,9 +90,13 @@ class FingerprintAddon:
             )
 
     def _classify(self, flow: http.HTTPFlow) -> str | None:
+        from upbox.addons._hostname import resolve_host
+
         req = flow.request
         ua = req.headers.get("user-agent", "")
-        host = req.host or ""
+        # Use SNI / Host header — req.host is the IP in LocalMode, which
+        # would never match the hostname rules in tools.yaml.
+        host = resolve_host(flow) or ""
         headers_lower = {
             k.lower(): v
             for k, v in req.headers.items()  # type: ignore[no-untyped-call]
