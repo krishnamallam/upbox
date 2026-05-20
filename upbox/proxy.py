@@ -27,6 +27,8 @@ def run(
     host: str = "127.0.0.1",
     port: int = 8888,
     capture_spec: str | None = None,
+    use_allowlist: bool = True,
+    extra_allow_hosts: tuple[str, ...] = (),
 ) -> None:
     """Boot the proxy. Blocks until interrupted (Ctrl+C).
 
@@ -53,10 +55,16 @@ def run(
     # Immediate ack so the user sees something during CA generation, which
     # on a fresh install takes a second or two.
     print(f"upbox proxy starting on {host}:{port} (Ctrl+C to stop)", flush=True)
-    asyncio.run(_run(host, port, capture_spec))
+    asyncio.run(_run(host, port, capture_spec, use_allowlist, extra_allow_hosts))
 
 
-async def _run(host: str, port: int, capture_spec: str | None) -> None:
+async def _run(
+    host: str,
+    port: int,
+    capture_spec: str | None,
+    use_allowlist: bool = True,
+    extra_allow_hosts: tuple[str, ...] = (),
+) -> None:
     # Ensure the upbox CA exists, then materialise it in mitmproxy's expected
     # confdir/mitmproxy-ca.pem combined-PEM format so the proxy generates leaf
     # certs that the user's tools (which trust upbox-ca) will accept.
@@ -69,7 +77,28 @@ async def _run(host: str, port: int, capture_spec: str | None) -> None:
     else:
         mode = ["regular"]
 
-    opts = Options(listen_host=host, listen_port=port, confdir=str(confdir), mode=mode)
+    opt_kwargs: dict[str, object] = {
+        "listen_host": host,
+        "listen_port": port,
+        "confdir": str(confdir),
+        "mode": mode,
+    }
+    if use_allowlist:
+        # Derive the TLS allowlist from tools.yaml. Pinned-cert apps
+        # (login.live.com, Teams, banking) and OS noise pass through
+        # untouched; only AI-tool traffic gets intercepted + audited.
+        from upbox.addons.fingerprint import load_allowed_host_patterns
+
+        patterns = load_allowed_host_patterns(extra_allow_hosts)
+        if patterns:
+            opt_kwargs["allow_hosts"] = patterns
+            print(
+                f"upbox: TLS allowlist active ({len(patterns)} host patterns from "
+                "tools.yaml). Non-AI traffic passes through without inspection.",
+                flush=True,
+            )
+
+    opts = Options(**opt_kwargs)
     master = DumpMaster(opts)
 
     store = Store()

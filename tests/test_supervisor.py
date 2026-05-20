@@ -152,3 +152,33 @@ def test_run_forwards_capture_spec_to_proxy(
         "--capture-spec",
         "claude.exe,cursor.exe",
     ]
+
+
+def test_run_forwards_no_allowlist_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
+    monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.01)
+
+    spawned_args: list[list[str]] = []
+    spawned_procs: list[FakeProc] = []
+
+    def fake_spawn(args: list[str]) -> Any:
+        spawned_args.append(list(args))
+        proc = FakeProc()
+        spawned_procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
+
+    def exit_proxy() -> None:
+        import time as _t
+
+        _t.sleep(0.05)
+        spawned_procs[0].set_exited(0)
+
+    threading.Thread(target=exit_proxy, daemon=True).start()
+    supervisor.run(use_allowlist=False, extra_allow_hosts=("custom.ai",))
+
+    assert "--no-allowlist" in spawned_args[0]
+    assert spawned_args[0][-2:] == ["--allow", "custom.ai"]

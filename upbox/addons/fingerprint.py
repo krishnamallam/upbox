@@ -15,6 +15,7 @@ file order; first match wins. Unmatched flows get ``None``.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -72,6 +73,34 @@ def load_rules() -> list[ToolRule]:
             resources.files("upbox.rules").joinpath(DEFAULT_RULES_RESOURCE).read_text()
         )
     return _parse_rules(raw)
+
+
+def load_allowed_host_patterns(extra: tuple[str, ...] = ()) -> list[str]:
+    """Build the regex allowlist for mitmproxy's ``allow_hosts`` option.
+
+    Extracts every unique hostname from ``tools.yaml`` and returns one
+    anchored regex per host that matches the host exactly OR as a
+    subdomain (``host`` itself, or ``*.host``). Any ``extra`` hosts
+    (e.g., from a CLI flag) are appended.
+
+    The resulting patterns are passed to ``mitmproxy.options.Options``
+    so only AI-tool traffic gets TLS-intercepted — everything else
+    (Outlook, banking, OS telemetry, pinned apps that would otherwise
+    break under MITM) passes through untouched.
+    """
+    hosts: set[str] = set()
+    for rule in load_rules():
+        hosts.update(rule.hosts)
+    hosts.update(extra)
+    return [_host_to_pattern(h) for h in sorted(hosts) if h]
+
+
+def _host_to_pattern(host: str) -> str:
+    escaped = re.escape(host)
+    # `^(?:.*\.)?<host>(?::\d+)?$` matches `host` exactly OR as a subdomain.
+    # The optional `:\d+` handles ``host:port`` form that mitmproxy
+    # sometimes presents.
+    return rf"^(?:.*\.)?{escaped}(?::\d+)?$"
 
 
 class FingerprintAddon:

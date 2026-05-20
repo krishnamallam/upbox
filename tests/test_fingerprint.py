@@ -60,6 +60,38 @@ def test_classify_matches_by_sni_when_host_is_ip() -> None:
     assert flow.metadata["upbox_tool"] == "Cursor"
 
 
+def test_load_allowed_host_patterns_includes_known_ai_hosts() -> None:
+    from upbox.addons.fingerprint import load_allowed_host_patterns
+
+    patterns = load_allowed_host_patterns()
+
+    # The bundled tools.yaml lists api.anthropic.com.
+    assert any("api\\.anthropic\\.com" in p for p in patterns)
+
+
+def test_allow_pattern_matches_host_and_subdomain() -> None:
+    import re
+
+    from upbox.addons.fingerprint import _host_to_pattern
+
+    pattern = re.compile(_host_to_pattern("api.cursor.sh"))
+
+    assert pattern.match("api.cursor.sh")
+    assert pattern.match("internal.api.cursor.sh")
+    assert not pattern.match("attacker.com")
+    # The host name appearing as a substring of an unrelated domain
+    # MUST NOT match — anchoring guards against this.
+    assert not pattern.match("api.cursor.sh.attacker.tld")
+
+
+def test_allow_pattern_includes_extra_hosts() -> None:
+    from upbox.addons.fingerprint import load_allowed_host_patterns
+
+    patterns = load_allowed_host_patterns(extra=("custom.ai.example.com",))
+
+    assert any("custom\\.ai\\.example\\.com" in p for p in patterns)
+
+
 def test_classify_matches_subdomain() -> None:
     addon = FingerprintAddon(rules=[_rule("Cursor", hosts=["cursor.sh"])])
     flow = _flow(host="api2.cursor.sh")

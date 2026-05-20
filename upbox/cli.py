@@ -54,6 +54,24 @@ def start(
             "See mitmproxy local-redirector docs for syntax."
         ),
     ),
+    no_allowlist: bool = typer.Option(
+        False,
+        "--no-allowlist",
+        help=(
+            "Disable the TLS allowlist (default: ON). Without an allowlist, "
+            "every HTTPS host gets MITM'd, which captures more but breaks "
+            "pinned-cert apps like Microsoft Login, Teams, and many banks."
+        ),
+    ),
+    allow: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--allow",
+        help=(
+            "Add a hostname to the TLS allowlist on top of tools.yaml. "
+            "Repeatable. Matches the host exactly OR as a subdomain "
+            "(e.g., --allow example.com also allows api.example.com)."
+        ),
+    ),
 ) -> None:
     """Start the proxy + dashboard with OS-level traffic capture.
 
@@ -71,6 +89,8 @@ def start(
         proxy_port=proxy_port,
         dashboard_port=dashboard_port,
         capture_spec=capture_spec,
+        use_allowlist=not no_allowlist,
+        extra_allow_hosts=tuple(allow or ()),
     )
     raise typer.Exit(code=rc)
 
@@ -87,11 +107,19 @@ def proxy(
             "= regular explicit-proxy mode (no OS capture)."
         ),
     ),
+    no_allowlist: bool = typer.Option(False, "--no-allowlist"),
+    allow: list[str] | None = typer.Option(None, "--allow"),  # noqa: B008
 ) -> None:
     """Run the upbox proxy (mitmproxy + capture addon). Blocks until Ctrl+C."""
     from upbox import proxy as proxy_module
 
-    proxy_module.run(host=host, port=port, capture_spec=capture_spec or None)
+    proxy_module.run(
+        host=host,
+        port=port,
+        capture_spec=capture_spec or None,
+        use_allowlist=not no_allowlist,
+        extra_allow_hosts=tuple(allow or ()),
+    )
 
 
 @app.command()
