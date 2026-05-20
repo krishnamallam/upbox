@@ -7,6 +7,8 @@ is testable without spawning processes.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -100,3 +102,16 @@ def test_supervisor_terminates_sibling_when_one_child_dies(
     supervisor.run()
 
     assert spawned[1].terminate_calls >= 1
+
+
+def test_spawn_module_invokes_typer_app() -> None:
+    # `python -m upbox.cli` exits rc=0 silently because cli.py has no main
+    # block, which made `upbox start` look like the proxy crashed cleanly.
+    # `python -m upbox` routes through __main__.py and actually runs the app.
+    result = subprocess.run(
+        [sys.executable, "-m", supervisor.SPAWN_MODULE, "proxy", "--help"],
+        capture_output=True,
+        timeout=15,
+    )
+
+    assert b"Run the upbox proxy" in result.stdout
