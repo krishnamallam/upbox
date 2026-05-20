@@ -22,11 +22,19 @@ from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
 
-log = logging.getLogger(__name__)
-
 
 def run(host: str = "127.0.0.1", port: int = 8888) -> None:
     """Boot the proxy. Blocks until interrupted (Ctrl+C)."""
+    # mitmproxy logs startup ("HTTP(S) proxy listening at ...") through the
+    # standard logging tree, but Python's root logger defaults to WARNING,
+    # which filters those records out before they reach mitmproxy's TermLog
+    # handler. Without this, `upbox proxy` looks completely dead on Windows
+    # until a request flows through.
+    logging.getLogger().setLevel(logging.INFO)
+
+    # Immediate ack so the user sees something during CA generation, which
+    # on a fresh install takes a second or two.
+    print(f"upbox proxy starting on {host}:{port} (Ctrl+C to stop)", flush=True)
     asyncio.run(_run(host, port))
 
 
@@ -52,7 +60,6 @@ async def _run(host: str, port: int) -> None:
         CaptureAddon(store),
     )
 
-    log.info("upbox proxy listening on %s:%d", host, port)
     try:
         await master.run()
     finally:
