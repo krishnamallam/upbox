@@ -1,63 +1,78 @@
 # Configuring AI tools to use the upbox proxy
 
-After `upbox init` (CA trusted) and `upbox start` (proxy listening on
-`127.0.0.1:8888`, dashboard on `http://127.0.0.1:8800`), point each AI
-tool at the proxy.
+After `upbox init` (CA trusted) and `upbox start` (proxy on
+`127.0.0.1:8888`, dashboard on `http://127.0.0.1:8800`), route each tool
+through upbox. The fastest path is `upbox run <tool>`.
 
-## Cursor
+## `upbox run <tool>` (recommended)
 
-**Launch with the upbox CA env var (Linux/macOS):**
+`upbox run` is one command. It auto-starts the proxy + dashboard if
+they aren't already up, finds the tool's installed executable, and
+spawns it as a child process with `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`
+set (or, for browsers, `--proxy-server` and an isolated user-data
+directory). When the tool exits — or you Ctrl+C the launcher — the
+auto-started proxy + dashboard get torn down. If you already had
+`upbox start` running in another terminal, that one is left alone and
+reused.
+
+Only the launched process is proxied; the rest of the system isn't
+touched, so a crashed upbox can't cut your machine's internet.
 
 ```sh
-NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem HTTPS_PROXY=http://127.0.0.1:8888 cursor
+upbox run claude         # Claude Desktop (Electron)
+upbox run claude-code    # Claude Code CLI (npm)
+upbox run cursor         # Cursor
+upbox run code           # VS Code (covers Copilot + Codeium extensions)
+upbox run chrome         # Chrome with --proxy-server (ChatGPT-web, Gemini-web)
+upbox run --list         # show all supported tools
 ```
 
-Cursor doesn't expose proxy config in its settings UI yet, so we rely on
-the `HTTPS_PROXY` env var (respected by Node's `undici`/`https` clients).
+Works the same on Linux, macOS, and Windows. On Windows, `upbox run`
+expands `%LOCALAPPDATA%` / `%PROGRAMFILES%` and locates the tool
+without any PowerShell or env-var setup.
 
-## Claude Desktop / Claude Code
+## Browser-based tools (ChatGPT, Gemini, Claude.ai)
 
-**Linux / macOS:**
+Browsers ignore `HTTPS_PROXY` env vars, so `upbox run chrome` passes
+`--proxy-server=http://127.0.0.1:8888` and uses an isolated profile
+under `~/.upbox/profiles/chrome/`. Existing Chrome logins and cookies
+stay untouched.
 
 ```sh
-NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem HTTPS_PROXY=http://127.0.0.1:8888 claude
+upbox run chrome
+# inside the launched window, navigate to chatgpt.com / gemini.google.com / claude.ai
 ```
 
-For the Anthropic Python SDK:
+To route Firefox the same way, set its proxy in Settings → Network
+Settings → Manual proxy → `127.0.0.1:8888`. Firefox uses its own NSS
+database; import the upbox CA via Settings → Privacy → Certificates →
+View Certificates → Authorities → Import (`~/.upbox/ca/upbox-ca.pem`).
+
+## Without `upbox run` (manual env vars)
+
+If your tool isn't in `upbox run --list`, set the env vars yourself.
+
+### Linux / macOS
+
+```sh
+NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem HTTPS_PROXY=http://127.0.0.1:8888 your-tool
+```
+
+### Windows PowerShell
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:8888"
+$env:NODE_EXTRA_CA_CERTS = "$env:USERPROFILE\.upbox\ca\upbox-ca.pem"
+& "C:\path\to\your-tool.exe"
+```
+
+### Anthropic / OpenAI Python SDKs
 
 ```sh
 HTTPS_PROXY=http://127.0.0.1:8888 REQUESTS_CA_BUNDLE=$HOME/.upbox/ca/upbox-ca.pem python your_script.py
 ```
 
-## GitHub Copilot (VSCode)
-
-VSCode has built-in proxy settings:
-
-1. Settings → search `http.proxy`
-2. Set to `http://127.0.0.1:8888`
-3. Set `http.proxyStrictSSL` to `true` (the upbox CA is trusted, so strict SSL is fine)
-
-If using VSCode on Linux, also launch with `NODE_EXTRA_CA_CERTS` so
-Copilot's Node runtime trusts the CA:
-
-```sh
-NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem code
-```
-
-## ChatGPT (web)
-
-In Firefox/Chrome:
-
-1. Settings → Network → Manual proxy → `127.0.0.1:8888`
-2. Visit `https://chat.openai.com` — traffic appears in the upbox feed.
-
-Some browsers cache trust decisions per-origin. If the page errors,
-clear the browser's HSTS for `chat.openai.com` (Chrome:
-`chrome://net-internals/#hsts`).
-
-## OpenAI / Anthropic API directly
-
-For `curl`:
+### `curl`
 
 ```sh
 curl --proxy http://127.0.0.1:8888 \
@@ -67,13 +82,13 @@ curl --proxy http://127.0.0.1:8888 \
      -d '{ "model": "gpt-4o-mini", "messages": [...] }'
 ```
 
-For Python SDKs (set `HTTPS_PROXY` and `REQUESTS_CA_BUNDLE` env vars
-before importing the client).
-
 ## What doesn't work (yet)
 
-- **Certificate-pinned apps.** A handful of mobile and some specialised
-  desktop clients ship with hard-coded CA fingerprints and refuse any
-  CA they don't know. There's no workaround for those without
-  modifying the app binary.
-- **Windows auto-install** is manual in v0.1 (see `installing-ca.md`).
+- **Certificate-pinned apps.** A few desktop AI clients ship hard-coded
+  CA fingerprints and refuse any CA they don't know. No workaround
+  without modifying the app binary.
+- **Tools launched by an updater.** Some apps (Squirrel-based
+  installers) re-exec themselves on first run and lose the env vars
+  set on the initial `upbox run` invocation. If you see the tool
+  bypassing the proxy after an auto-update, restart it via
+  `upbox run <tool>` again.
