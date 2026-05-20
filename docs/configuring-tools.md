@@ -1,61 +1,73 @@
-# Configuring AI tools to use the upbox proxy
+# Capturing AI tool traffic with upbox
 
-After `upbox init` (CA trusted) and `upbox start` (proxy on
-`127.0.0.1:8888`, dashboard on `http://127.0.0.1:8800`), route each tool
-through upbox. The fastest path is `upbox run <tool>`.
+After `upbox init` (trusts the local CA) and `upbox start`, upbox runs
+mitmproxy in **LocalMode** — an OS-level traffic redirector that
+intercepts HTTPS at the network layer for every process on the machine.
+Same model as Wireshark/Charles Proxy. No per-tool configuration, no
+system-proxy registry edits, no `HTTPS_PROXY` env vars.
 
-## `upbox run <tool>` (recommended)
-
-`upbox run` is one command. It auto-starts the proxy + dashboard if
-they aren't already up, finds the tool's installed executable, and
-spawns it as a child process with `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`
-set (or, for browsers, `--proxy-server` and an isolated user-data
-directory). When the tool exits — or you Ctrl+C the launcher — the
-auto-started proxy + dashboard get torn down. If you already had
-`upbox start` running in another terminal, that one is left alone and
-reused.
-
-Only the launched process is proxied; the rest of the system isn't
-touched, so a crashed upbox can't cut your machine's internet.
+## `upbox start` — one command
 
 ```sh
-upbox run claude         # Claude Desktop (Electron)
-upbox run claude-code    # Claude Code CLI (npm)
-upbox run cursor         # Cursor
-upbox run code           # VS Code (covers Copilot + Codeium extensions)
-upbox run chrome         # Chrome with --proxy-server (ChatGPT-web, Gemini-web)
-upbox run --list         # show all supported tools
+upbox start
 ```
 
-Works the same on Linux, macOS, and Windows. On Windows, `upbox run`
-expands `%LOCALAPPDATA%` / `%PROGRAMFILES%` and locates the tool
-without any PowerShell or env-var setup.
+Boots:
+- mitmproxy on `127.0.0.1:8888` with LocalMode capture
+- dashboard on `127.0.0.1:8800`
 
-## Browser-based tools (ChatGPT, Gemini, Claude.ai)
+When you Ctrl+C, the proxy and dashboard shut down and the OS network
+redirector unwinds cleanly — no leftover state, no risk of stranding
+the machine with a dead proxy.
 
-Browsers ignore `HTTPS_PROXY` env vars, so `upbox run chrome` passes
-`--proxy-server=http://127.0.0.1:8888` and uses an isolated profile
-under `~/.upbox/profiles/chrome/`. Existing Chrome logins and cookies
-stay untouched.
+### Admin / root requirement
+
+LocalMode hooks the OS network layer. First run requires elevation:
+
+| Platform | What it uses | First-run prompt |
+|----------|-------------|------------------|
+| Windows  | WinDivert kernel driver | UAC prompt to install the driver |
+| Linux    | iptables / nftables     | `sudo upbox start`, or run as root |
+| macOS    | Network Extension       | "Allow extension" in System Settings |
+
+After the driver/extension is approved once, subsequent runs may not need
+admin (Windows). Linux always needs root for raw iptables.
+
+If LocalMode isn't available, upbox prints the reason from
+`mitmproxy_rs.local.LocalRedirector.unavailable_reason()` (e.g.,
+"mitmproxy is not running as root") and exits. Fall back to regular
+mode:
 
 ```sh
-upbox run chrome
-# inside the launched window, navigate to chatgpt.com / gemini.google.com / claude.ai
+upbox start --capture-spec ""
 ```
 
-To route Firefox the same way, set its proxy in Settings → Network
-Settings → Manual proxy → `127.0.0.1:8888`. Firefox uses its own NSS
-database; import the upbox CA via Settings → Privacy → Certificates →
-View Certificates → Authorities → Import (`~/.upbox/ca/upbox-ca.pem`).
+…which boots mitmproxy in standard explicit-proxy mode. You'd then route
+tools manually with `HTTPS_PROXY=http://127.0.0.1:8888` (recipes below).
 
-## Without `upbox run` (manual env vars)
+## Filtering what gets captured
 
-If your tool isn't in `upbox run --list`, set the env vars yourself.
+`--capture-spec` accepts mitmproxy's LocalMode intercept syntax. Default
+is `!__upbox_disabled__` (sentinel exclude → captures everything).
+
+```sh
+upbox start --capture-spec "claude.exe,cursor.exe,code.exe"   # AI tools only
+upbox start --capture-spec "!firefox,!chrome"                  # exclude browsers
+upbox start --capture-spec ""                                  # disable LocalMode
+```
+
+Process matching is by executable name. The mitmproxy docs have the full
+grammar.
+
+## Fallback: manual env vars (when LocalMode isn't an option)
+
+If you can't get admin/root, run upbox in regular mode and route tools
+yourself:
 
 ### Linux / macOS
 
 ```sh
-NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem HTTPS_PROXY=http://127.0.0.1:8888 your-tool
+NODE_EXTRA_CA_CERTS=$HOME/.upbox/ca/upbox-ca.pem HTTPS_PROXY=http://127.0.0.1:8888 your-app
 ```
 
 ### Windows PowerShell
@@ -84,11 +96,9 @@ curl --proxy http://127.0.0.1:8888 \
 
 ## What doesn't work (yet)
 
-- **Certificate-pinned apps.** A few desktop AI clients ship hard-coded
-  CA fingerprints and refuse any CA they don't know. No workaround
-  without modifying the app binary.
-- **Tools launched by an updater.** Some apps (Squirrel-based
-  installers) re-exec themselves on first run and lose the env vars
-  set on the initial `upbox run` invocation. If you see the tool
-  bypassing the proxy after an auto-update, restart it via
-  `upbox run <tool>` again.
+- **Certificate-pinned apps.** A few desktop and mobile clients ship
+  hard-coded CA fingerprints and refuse any CA they don't know. No
+  workaround without modifying the app binary.
+- **Apps that bypass the OS network stack entirely.** Rare, but
+  some VPN clients and kernel-mode networking apps may evade even
+  LocalMode.

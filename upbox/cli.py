@@ -44,11 +44,34 @@ def init(
 def start(
     proxy_port: int = typer.Option(8888, help="Proxy port to listen on."),
     dashboard_port: int = typer.Option(8800, help="Dashboard port to listen on."),
+    capture_spec: str = typer.Option(
+        "!__upbox_disabled__",
+        "--capture-spec",
+        help=(
+            "mitmproxy LocalMode intercept spec. Default captures all processes "
+            "(via a sentinel exclude). Examples: 'claude.exe,cursor.exe' for "
+            "AI tools only; '!firefox,!chrome' to skip browsers. "
+            "See mitmproxy local-redirector docs for syntax."
+        ),
+    ),
 ) -> None:
-    """Start the proxy and dashboard together (supervisor). Blocks until Ctrl+C."""
+    """Start the proxy + dashboard with OS-level traffic capture.
+
+    Uses mitmproxy's LocalMode (mitmproxy-rs redirector) to intercept HTTPS
+    traffic at the network layer — Wireshark-style. No system-proxy registry
+    edits required, no per-app launchers, no "stuck offline" failure mode.
+
+    Requires admin/root on first run (Windows: WinDivert driver install;
+    Linux: iptables; macOS: Network Extension approval). After that, the OS
+    handles capture transparently and mitmproxy reverts cleanly on exit.
+    """
     from upbox import supervisor
 
-    rc = supervisor.run(proxy_port=proxy_port, dashboard_port=dashboard_port)
+    rc = supervisor.run(
+        proxy_port=proxy_port,
+        dashboard_port=dashboard_port,
+        capture_spec=capture_spec,
+    )
     raise typer.Exit(code=rc)
 
 
@@ -56,11 +79,19 @@ def start(
 def proxy(
     host: str = typer.Option("127.0.0.1", help="Proxy bind host."),
     port: int = typer.Option(8888, help="Proxy port to listen on."),
+    capture_spec: str = typer.Option(
+        "",
+        "--capture-spec",
+        help=(
+            "mitmproxy LocalMode intercept spec for OS-level capture. Empty "
+            "= regular explicit-proxy mode (no OS capture)."
+        ),
+    ),
 ) -> None:
     """Run the upbox proxy (mitmproxy + capture addon). Blocks until Ctrl+C."""
     from upbox import proxy as proxy_module
 
-    proxy_module.run(host=host, port=port)
+    proxy_module.run(host=host, port=port, capture_spec=capture_spec or None)
 
 
 @app.command()
@@ -72,91 +103,6 @@ def dashboard(
     from upbox.dashboard import app as dashboard_app
 
     dashboard_app.run(host=host, port=port)
-
-
-@app.command()
-def run(
-    tool: str = typer.Argument(
-        None,
-        help="AI tool to launch (claude, cursor, code, claude-code, chrome).",
-    ),
-    host: str = typer.Option("127.0.0.1", help="Proxy host the child should target."),
-    port: int = typer.Option(8888, help="Proxy port the child should target."),
-    dashboard_port: int = typer.Option(8800, help="Dashboard port (auto-started)."),
-    list_tools: bool = typer.Option(False, "--list", "-l", help="List known tools and exit."),
-    no_start: bool = typer.Option(
-        False, "--no-start", help="Skip auto-starting proxy + dashboard."
-    ),
-) -> None:
-    """Launch an AI tool routed through the upbox proxy.
-
-    Boots `upbox start` (proxy + dashboard) in the background if it isn't
-    already running, then spawns the tool with HTTPS_PROXY +
-    NODE_EXTRA_CA_CERTS set on the child process only. When the tool exits
-    (or you Ctrl+C), the auto-started proxy + dashboard get torn down. If
-    they were already running from another terminal, they're left alone.
-    """
-    import subprocess as _subprocess
-    import sys as _sys
-
-    from upbox import launchers
-
-    if list_tools:
-        for t in launchers.TOOLS:
-            aliases = ", ".join(t.aliases)
-            typer.echo(f"  {t.name:16s}  aliases: {aliases}")
-        return
-
-    if not tool:
-        typer.echo("Missing tool argument. Try `upbox run --list`.", err=True)
-        raise typer.Exit(code=1)
-
-    selected = launchers.find_tool(tool)
-    if selected is None:
-        known = ", ".join(t.name for t in launchers.TOOLS)
-        typer.echo(f"Unknown tool: {tool}. Known: {known}", err=True)
-        raise typer.Exit(code=1)
-
-    sup_proc: _subprocess.Popen[bytes] | None = None
-    proxy_was_running = launchers.is_listening(host, port)
-    if not proxy_was_running and not no_start:
-        typer.echo(f"upbox: starting proxy on {host}:{port} + dashboard on :{dashboard_port}")
-        sup_proc = _subprocess.Popen(
-            [
-                _sys.executable,
-                "-m",
-                "upbox",
-                "start",
-                "--proxy-port",
-                str(port),
-                "--dashboard-port",
-                str(dashboard_port),
-            ]
-        )
-        if not launchers.wait_for_listening(host, port, timeout=20, sentinel=sup_proc):
-            typer.echo("upbox: proxy did not start in time", err=True)
-            sup_proc.terminate()
-            raise typer.Exit(code=3)
-        typer.echo(f"upbox: dashboard ready at http://127.0.0.1:{dashboard_port}")
-    elif proxy_was_running:
-        typer.echo(f"upbox: proxy already running on {host}:{port} — reusing it")
-
-    try:
-        rc = launchers.launch(selected, proxy_host=host, proxy_port=port)
-    except FileNotFoundError as exc:
-        typer.echo(str(exc), err=True)
-        if sup_proc is not None:
-            sup_proc.terminate()
-        raise typer.Exit(code=2) from exc
-    finally:
-        if sup_proc is not None:
-            typer.echo("upbox: tearing down proxy + dashboard")
-            sup_proc.terminate()
-            try:
-                sup_proc.wait(timeout=5)
-            except _subprocess.TimeoutExpired:
-                sup_proc.kill()
-    raise typer.Exit(code=rc)
 
 
 @app.command()
