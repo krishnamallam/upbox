@@ -28,13 +28,26 @@ IS_WINDOWS = sys.platform == "win32"
 SPAWN_MODULE = "upbox"
 
 
-def run(proxy_port: int = 8888, dashboard_port: int = 8800) -> int:
-    """Spawn proxy + dashboard, wait until either dies. Returns the dead child's rc."""
+def run(
+    proxy_port: int = 8888,
+    dashboard_port: int = 8800,
+    capture_spec: str | None = None,
+) -> int:
+    """Spawn proxy + dashboard, wait until either dies. Returns the dead child's rc.
+
+    ``capture_spec`` is forwarded to ``upbox proxy`` as mitmproxy's LocalMode
+    intercept spec. If ``None``, the proxy boots in standard explicit-proxy
+    mode (no OS-level capture).
+    """
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(os.getpid()))
 
+    proxy_args = ["proxy", "--port", str(proxy_port)]
+    if capture_spec is not None:
+        proxy_args.extend(["--capture-spec", capture_spec])
+
     try:
-        proxy_proc = _spawn(["proxy", "--port", str(proxy_port)])
+        proxy_proc = _spawn(proxy_args)
         dashboard_proc = _spawn(["dashboard", "--port", str(dashboard_port)])
     except Exception:
         PID_FILE.unlink(missing_ok=True)

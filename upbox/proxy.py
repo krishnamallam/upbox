@@ -23,8 +23,26 @@ from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
 
 
-def run(host: str = "127.0.0.1", port: int = 8888) -> None:
-    """Boot the proxy. Blocks until interrupted (Ctrl+C)."""
+def run(
+    host: str = "127.0.0.1",
+    port: int = 8888,
+    capture_spec: str | None = None,
+) -> None:
+    """Boot the proxy. Blocks until interrupted (Ctrl+C).
+
+    If ``capture_spec`` is set, mitmproxy runs in LocalMode (the OS-level
+    traffic redirector from ``mitmproxy-rs``). The spec is a comma-
+    separated process filter — e.g. ``"!firefox"`` to capture everything
+    except Firefox, or ``"claude.exe,cursor.exe"`` to only capture those.
+    The sentinel value ``"!__upbox_disabled__"`` captures all processes
+    (sentinel name never matches a real process, so the "exclude" rule
+    becomes a no-op and everything else flows through).
+
+    LocalMode requires admin/root: WinDivert driver on Windows, iptables
+    on Linux, Network Extension approval on macOS. If ``capture_spec`` is
+    ``None``, the proxy runs in regular explicit-proxy mode (clients must
+    set HTTPS_PROXY themselves).
+    """
     # mitmproxy logs startup ("HTTP(S) proxy listening at ...") through the
     # standard logging tree, but Python's root logger defaults to WARNING,
     # which filters those records out before they reach mitmproxy's TermLog
@@ -35,17 +53,23 @@ def run(host: str = "127.0.0.1", port: int = 8888) -> None:
     # Immediate ack so the user sees something during CA generation, which
     # on a fresh install takes a second or two.
     print(f"upbox proxy starting on {host}:{port} (Ctrl+C to stop)", flush=True)
-    asyncio.run(_run(host, port))
+    asyncio.run(_run(host, port, capture_spec))
 
 
-async def _run(host: str, port: int) -> None:
+async def _run(host: str, port: int, capture_spec: str | None) -> None:
     # Ensure the upbox CA exists, then materialise it in mitmproxy's expected
     # confdir/mitmproxy-ca.pem combined-PEM format so the proxy generates leaf
     # certs that the user's tools (which trust upbox-ca) will accept.
     ca.generate_ca()
     confdir = ca.write_mitmproxy_bundle()
 
-    opts = Options(listen_host=host, listen_port=port, confdir=str(confdir))
+    if capture_spec:
+        _check_local_mode_available()
+        mode = [f"local:{capture_spec}"]
+    else:
+        mode = ["regular"]
+
+    opts = Options(listen_host=host, listen_port=port, confdir=str(confdir), mode=mode)
     master = DumpMaster(opts)
 
     store = Store()
@@ -64,6 +88,19 @@ async def _run(host: str, port: int) -> None:
         await master.run()
     finally:
         store.close()
+
+
+def _check_local_mode_available() -> None:
+    """Fail fast with a useful message if LocalMode isn't usable here."""
+    from mitmproxy_rs.local import LocalRedirector
+
+    reason = LocalRedirector.unavailable_reason()
+    if reason:
+        raise RuntimeError(
+            f"OS-level capture (LocalMode) is unavailable: {reason}. "
+            "Re-run `upbox start` with admin/root, or pass --capture-spec '' "
+            "to fall back to regular explicit-proxy mode."
+        )
 
 
 if __name__ == "__main__":

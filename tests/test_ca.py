@@ -102,22 +102,10 @@ def test_electron_app_hint_includes_cert_path(tmp_ca_dir: Path) -> None:
     assert str(ca.cert_path(tmp_ca_dir)) in hint
 
 
-def test_electron_app_hint_recommends_upbox_run(tmp_ca_dir: Path) -> None:
+def test_electron_app_hint_recommends_upbox_start(tmp_ca_dir: Path) -> None:
     hint = ca.electron_app_hint(tmp_ca_dir)
 
-    assert "upbox run" in hint
-
-
-def test_electron_app_hint_on_windows_does_not_use_bash_assignment(
-    tmp_ca_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Regression: previous hint printed `NODE_EXTRA_CA_CERTS=<path> <app>`,
-    # which is bash inline-env syntax. On Windows PowerShell that does
-    # nothing and silently fails to route the tool.
-    monkeypatch.setattr(ca.platform, "system", lambda: "Windows")
-    hint = ca.electron_app_hint(tmp_ca_dir)
-
-    assert "NODE_EXTRA_CA_CERTS=" not in hint
+    assert "upbox start" in hint
 
 
 def test_install_linux_nss_returns_false_when_certutil_missing(

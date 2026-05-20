@@ -115,3 +115,40 @@ def test_spawn_module_invokes_typer_app() -> None:
     )
 
     assert b"Run the upbox proxy" in result.stdout
+
+
+def test_run_forwards_capture_spec_to_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
+    monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.01)
+
+    spawned_args: list[list[str]] = []
+    spawned_procs: list[FakeProc] = []
+
+    def fake_spawn(args: list[str]) -> Any:
+        spawned_args.append(list(args))
+        proc = FakeProc()
+        spawned_procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
+
+    def exit_proxy_after_delay() -> None:
+        import time as _t
+
+        _t.sleep(0.05)
+        spawned_procs[0].set_exited(0)
+
+    threading.Thread(target=exit_proxy_after_delay, daemon=True).start()
+    supervisor.run(capture_spec="claude.exe,cursor.exe")
+
+    assert spawned_args[0] == [
+        "proxy",
+        "--port",
+        "8888",
+        "--capture-spec",
+        "claude.exe,cursor.exe",
+    ]
