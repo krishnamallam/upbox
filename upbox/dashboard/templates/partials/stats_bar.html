@@ -1,0 +1,22 @@
+<div class="stat">
+  <div class="stat-value">{{ stats['total'] or 0 }}</div>
+  <div class="stat-label">Requests</div>
+</div>
+<div class="stat">
+  <div class="stat-value">{{ stats['redacted'] or 0 }}</div>
+  <div class="stat-label">Redacted</div>
+</div>
+<div class="stat">
+  <div class="stat-value">{{ stats['blocked'] or 0 }}</div>
+  <div class="stat-label">Blocked</div>
+</div>
+<div class="stat">
+  <div class="stat-value mono" style="font-size: 14px;">{{ bind }}</div>
+  <div class="stat-label">Bind</div>
+</div>
+<div class="stats-actions">
+  <button id="btn-pause" class="btn-pause" type="button">
+    <span id="pause-label">⏸ Pause</span>
+  </button>
+  <span id="live-indicator" class="live-indicator">Live</span>
+</div>

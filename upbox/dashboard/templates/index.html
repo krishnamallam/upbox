@@ -1,12 +1,19 @@
 {% extends "base.html" %}
 
+{% block sidebar %}
+  {% include "partials/sidebar.html" %}
+{% endblock %}
+
 {% block main %}
-<div class="layout">
+  <div class="stats-bar" id="stats-bar">
+    {% include "partials/stats_bar.html" %}
+  </div>
+
   <section class="feed" id="feed">
-    {% include "partials/recent.html" %}
+    {% include "partials/feed.html" %}
   </section>
-  <aside class="detail" id="detail">
-    <p class="muted">Click a request to see headers and body excerpt.</p>
-  </aside>
-</div>
+
+  <section class="detail" id="detail">
+    <div class="detail-empty">Click a request to inspect headers and body excerpt.</div>
+  </section>
 {% endblock %}

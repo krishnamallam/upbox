@@ -1,5 +1,17 @@
 {% extends "base.html" %}
 
+{% block sidebar %}
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <strong>upbox</strong>
+    <small>local proxy audit</small>
+  </div>
+  <div class="sidebar-section">Dashboard</div>
+  <a href="/" class="sidebar-link">Live feed <span class="shortcut">F</span></a>
+  <a href="/settings" class="sidebar-link active">Settings</a>
+</aside>
+{% endblock %}
+
 {% block main %}
 <div class="settings">
   <h2>Settings</h2>

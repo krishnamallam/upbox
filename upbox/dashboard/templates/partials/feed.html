@@ -1,0 +1,60 @@
+{% if rows %}
+<table class="feed-table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Tool · Host · Path</th>
+      <th class="col-size">Size</th>
+      <th class="col-redact">Redact</th>
+      <th class="col-status">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      {% set ic = icon_for(row['tool']) %}
+      {% set redacted = row['redactions_applied_json'] is not none %}
+      {% set blocked = row['blocked'] %}
+      <tr data-id="{{ row['id'] }}" onclick="upboxDetail({{ row['id'] }})">
+        <td class="col-time">{{ row['ts'] | ago }}</td>
+        <td class="col-tool-host">
+          <div class="tool-host-cell">
+            <span class="tool-icon tool-icon-sm tool-icon-{{ ic.code }}">{{ ic.monogram }}</span>
+            <div class="tool-host-text">
+              <span class="method">{{ row['method'] }}</span>
+              <span class="host-path">{{ row['host'] }}{{ row['path'] }}</span>
+            </div>
+          </div>
+        </td>
+        <td class="col-size">{{ row['req_bytes'] | bytes }}</td>
+        <td class="col-redact">
+          {% if redacted %}
+            {# count = number of redaction events in the JSON list; cheap to compute client-side too #}
+            {% set rcount = (row['redactions_applied_json'] | from_json | length) if row['redactions_applied_json'] else 0 %}
+            {{ rcount }}×
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="col-status">
+          {% if blocked %}
+            <span class="badge badge-blocked">blocked</span>
+          {% elif redacted %}
+            <span class="badge badge-redacted">redacted</span>
+          {% else %}
+            <span class="badge badge-forwarded">forwarded</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+  {% if selected_tool %}
+    <p>No requests captured for <strong>{{ selected_tool }}</strong> yet.</p>
+  {% else %}
+    <p>No requests captured yet.</p>
+    <p class="small">Run <code>upbox init</code>, then <code>upbox start</code> (LocalMode auto-captures all HTTPS traffic on this machine).</p>
+  {% endif %}
+</div>
+{% endif %}
