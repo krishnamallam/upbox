@@ -1,9 +1,10 @@
 # Changelog
 
-## v0.1.0 — first viral screenshot (2026-07-15 target)
+## v0.1.0 — 2026-05-15
 
 Initial public release. Single-machine AI tool traffic auditor: local
 proxy, dashboard, redaction, per-tool allowlist, audit-log export.
+Supports macOS, Linux, and Windows.
 
 ### Added
 
