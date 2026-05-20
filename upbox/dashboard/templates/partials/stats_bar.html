@@ -1,5 +1,19 @@
 {% set status = current_status or 'all' %}
-<a href="/" class="stat-cell {% if status == 'all' %}on{% endif %}" title="Show all requests">
+{% set range = current_range or 'All' %}
+{% set tool = selected_tool %}
+{% set q = current_query or '' %}
+
+{# Preserve range/tool/q while changing status — minimal duplicate of filter_bar's link macro. #}
+{% macro stat_link(set_status, base='/') -%}
+  {%- set parts = [] -%}
+  {%- if range and range != 'All' %}{% set _ = parts.append('range=' + range) %}{% endif -%}
+  {%- if set_status and set_status != 'all' %}{% set _ = parts.append('status=' + set_status) %}{% endif -%}
+  {%- if tool %}{% set _ = parts.append('tool=' + (tool | urlencode)) %}{% endif -%}
+  {%- if q %}{% set _ = parts.append('q=' + (q | urlencode)) %}{% endif -%}
+  {{ base }}{% if parts %}?{{ parts | join('&') }}{% endif %}
+{%- endmacro %}
+
+<a href="{{ stat_link('all') }}" class="stat-cell {% if status == 'all' %}on{% endif %}" title="Show all requests">
   <div class="lbl">Requests · 24h</div>
   <div class="val">{{ '{:,}'.format(stats['total'] or 0) }}</div>
 </a>
@@ -7,11 +21,11 @@
   <div class="lbl">Bytes captured</div>
   <div class="val">{{ stats['total_bytes'] | bytes if stats['total_bytes'] is not none else '0 B' }}</div>
 </button>
-<a href="/?status=redacted" class="stat-cell {% if status == 'redacted' %}on{% endif %}" title="Filter → redacted">
+<a href="{{ stat_link('redacted') }}" class="stat-cell {% if status == 'redacted' %}on{% endif %}" title="Filter → redacted">
   <div class="lbl">Redacted</div>
   <div class="val warn">{{ stats['redacted'] or 0 }}</div>
 </a>
-<a href="/?status=blocked" class="stat-cell {% if status == 'blocked' %}on{% endif %}" title="Filter → blocked">
+<a href="{{ stat_link('blocked') }}" class="stat-cell {% if status == 'blocked' %}on{% endif %}" title="Filter → blocked">
   <div class="lbl">Blocked</div>
   <div class="val bad">{{ stats['blocked'] or 0 }}</div>
 </a>
@@ -32,6 +46,6 @@
   <button id="btn-pause" class="btn" type="button" title="Pause the live feed (Space)">
     <span id="pause-label">⏸ Pause</span>
   </button>
-  <a class="btn" href="/export" title="Export filtered rows as JSONL">↓ Export</a>
+  <a class="btn" href="{{ stat_link(status, base='/export') }}" title="Export the filtered rows as JSONL">↓ Export</a>
   <span id="live-indicator" class="live">Live</span>
 </div>

@@ -113,11 +113,16 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
+        f = _read_filters(request)
         s = store(request)
-        tool = request.query_params.get("tool") or None
-        status = request.query_params.get("status") or None
-        rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
-        rows = _apply_status_filter(rows, status)
+        rows = s.query_filtered(
+            since=_range_to_since(f["range"]),
+            tool=f["tool"],
+            status=f["status"],
+            search=f["query"],
+            order="DESC",
+            limit=100,
+        )
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -125,23 +130,37 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "tools": s.per_tool_summary(),
                 "rows": rows,
                 "stats": s.dashboard_stats(),
-                "selected_tool": tool,
-                "current_status": status,
+                "selected_tool": f["tool"],
+                "current_status": f["status"],
+                "current_range": f["range"],
+                "current_query": f["query"],
+                "visible_count": len(rows),
                 "bind": "127.0.0.1",
             },
         )
 
     @app.get("/requests/recent", response_class=HTMLResponse)
     async def recent(request: Request) -> HTMLResponse:
+        f = _read_filters(request)
         s = store(request)
-        tool = request.query_params.get("tool") or None
-        status = request.query_params.get("status") or None
-        rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
-        rows = _apply_status_filter(rows, status)
+        rows = s.query_filtered(
+            since=_range_to_since(f["range"]),
+            tool=f["tool"],
+            status=f["status"],
+            search=f["query"],
+            order="DESC",
+            limit=100,
+        )
         return templates.TemplateResponse(
             request,
             "partials/feed.html",
-            {"rows": rows, "selected_tool": tool, "current_status": status},
+            {
+                "rows": rows,
+                "selected_tool": f["tool"],
+                "current_status": f["status"],
+                "current_range": f["range"],
+                "current_query": f["query"],
+            },
         )
 
     @app.get("/sidebar", response_class=HTMLResponse)
@@ -158,6 +177,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
 
     @app.get("/stats", response_class=HTMLResponse)
     async def stats(request: Request) -> HTMLResponse:
+        f = _read_filters(request)
         s = store(request)
         return templates.TemplateResponse(
             request,
@@ -165,7 +185,10 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
             {
                 "stats": s.dashboard_stats(),
                 "bind": "127.0.0.1",
-                "current_status": request.query_params.get("status") or None,
+                "current_status": f["status"],
+                "current_range": f["range"],
+                "selected_tool": f["tool"],
+                "current_query": f["query"],
             },
         )
 
@@ -185,15 +208,18 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     async def export_jsonl(request: Request) -> StreamingResponse:
         """Stream the filtered feed as JSONL for download.
 
-        Mirrors the ``/`` filters (tool, status) so the user gets exactly the
-        rows they're looking at. No body bytes — only the audit-row excerpts
-        already in the store.
+        Mirrors the ``/`` filters (range, status, tool, search) so the user
+        gets exactly the rows they're looking at. No body bytes — only the
+        audit-row excerpts already in the store.
         """
+        f = _read_filters(request)
         s = store(request)
-        tool = request.query_params.get("tool") or None
-        status = request.query_params.get("status") or None
-        rows = s.query_filtered(tool=tool) if tool else list(s.iter_all())
-        rows = _apply_status_filter(rows, status)
+        rows = s.query_filtered(
+            since=_range_to_since(f["range"]),
+            tool=f["tool"],
+            status=f["status"],
+            search=f["query"],
+        )
 
         def stream() -> Iterator[str]:
             for row in rows:
@@ -251,19 +277,46 @@ def _parse_headers(headers_json: str | None) -> dict[str, Any]:
         return {}
 
 
-def _apply_status_filter(rows: list[Any], status: str | None) -> list[Any]:
-    """Filter feed rows by status badge: forwarded / redacted / blocked.
+_VALID_RANGES = {"5m", "1h", "24h", "All"}
+_VALID_STATUSES = {"all", "forwarded", "redacted", "blocked"}
 
-    Unknown values pass through unchanged so callers can pass query-string
-    junk without raising.
+
+def _read_filters(request: Request) -> dict[str, str | None]:
+    """Pull and validate the four feed filters from the query string.
+
+    Unknown values fall back to ``None`` (or ``"All"`` / ``"all"`` for the
+    segment filters) so a malformed query string never produces a 500. Query
+    text is capped at 200 chars to keep LIKE comparisons cheap.
     """
-    if status == "blocked":
-        return [r for r in rows if r["blocked"]]
-    if status == "redacted":
-        return [r for r in rows if not r["blocked"] and r["redactions_applied_json"] is not None]
-    if status == "forwarded":
-        return [r for r in rows if not r["blocked"] and r["redactions_applied_json"] is None]
-    return rows
+    qp = request.query_params
+    raw_range = qp.get("range") or "All"
+    raw_status = qp.get("status") or "all"
+    return {
+        "range": raw_range if raw_range in _VALID_RANGES else "All",
+        "status": raw_status if raw_status in _VALID_STATUSES else "all",
+        "tool": (qp.get("tool") or "").strip() or None,
+        "query": (qp.get("q") or "").strip()[:200] or None,
+    }
+
+
+def _range_to_since(range_str: str | None) -> str | None:
+    """Convert a UI range label (``5m`` / ``1h`` / ``24h`` / ``All``) to an
+    ISO timestamp matching the capture addon's ``datetime.now(UTC).isoformat()``
+    storage format. ``All`` and unknown values map to ``None`` (no lower bound).
+    """
+    if not range_str or range_str == "All":
+        return None
+    from datetime import UTC, datetime, timedelta
+
+    deltas = {
+        "5m": timedelta(minutes=5),
+        "1h": timedelta(hours=1),
+        "24h": timedelta(hours=24),
+    }
+    delta = deltas.get(range_str)
+    if delta is None:
+        return None
+    return (datetime.now(UTC) - delta).isoformat()
 
 
 def run(host: str = "127.0.0.1", port: int = 8800) -> None:
