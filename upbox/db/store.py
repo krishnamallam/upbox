@@ -147,6 +147,19 @@ class Store:
             )
         )
 
+    def dashboard_stats(self) -> sqlite3.Row:
+        """Aggregate counts for the dashboard stats bar (total / redacted / blocked)."""
+        row = self._conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN redactions_applied_json IS NOT NULL THEN 1 ELSE 0 END) AS redacted,
+                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked
+            FROM requests
+            """
+        ).fetchone()
+        return cast("sqlite3.Row", row)
+
     def per_tool_summary(self) -> list[sqlite3.Row]:
         """Per-tool aggregates for the dashboard tiles."""
         return list(

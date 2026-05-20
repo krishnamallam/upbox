@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from upbox import settings
+from upbox.dashboard.icons import icon_for
 from upbox.db.store import DEFAULT_DB_PATH, Store
 
 
@@ -45,6 +46,50 @@ def _format_bytes(value: int | None) -> str:
 
 
 templates.env.filters["bytes"] = _format_bytes
+templates.env.globals["icon_for"] = icon_for
+
+
+def _ago(ts: str | None) -> str:
+    """Render a SQLite timestamp as a compact relative offset (e.g. ``-5s``).
+
+    Falls back to the raw value if parsing fails — we'd rather show
+    something than a blank cell.
+    """
+    if not ts:
+        return "—"
+    try:
+        from datetime import UTC, datetime
+
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - when
+        seconds = int(delta.total_seconds())
+    except (ValueError, TypeError):
+        return ts
+    if seconds < 60:
+        return f"-{seconds}s"
+    if seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f"-{m}m {s}s"
+    h, rem = divmod(seconds, 3600)
+    m = rem // 60
+    return f"-{h}h {m}m"
+
+
+templates.env.filters["ago"] = _ago
+
+
+def _from_json(value: str | None) -> Any:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError):
+        return None
+
+
+templates.env.filters["from_json"] = _from_json
 
 
 def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
@@ -69,25 +114,50 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
         s = store(request)
+        tool = request.query_params.get("tool") or None
+        rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 "tools": s.per_tool_summary(),
-                "rows": s.query_recent(limit=100),
+                "rows": rows,
+                "stats": s.dashboard_stats(),
+                "selected_tool": tool,
+                "bind": "127.0.0.1",
             },
         )
 
     @app.get("/requests/recent", response_class=HTMLResponse)
     async def recent(request: Request) -> HTMLResponse:
         s = store(request)
+        tool = request.query_params.get("tool") or None
+        rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
         return templates.TemplateResponse(
             request,
-            "partials/recent.html",
+            "partials/feed.html",
+            {"rows": rows, "selected_tool": tool},
+        )
+
+    @app.get("/sidebar", response_class=HTMLResponse)
+    async def sidebar(request: Request) -> HTMLResponse:
+        s = store(request)
+        return templates.TemplateResponse(
+            request,
+            "partials/sidebar.html",
             {
                 "tools": s.per_tool_summary(),
-                "rows": s.query_recent(limit=100),
+                "selected_tool": request.query_params.get("tool") or None,
             },
+        )
+
+    @app.get("/stats", response_class=HTMLResponse)
+    async def stats(request: Request) -> HTMLResponse:
+        s = store(request)
+        return templates.TemplateResponse(
+            request,
+            "partials/stats_bar.html",
+            {"stats": s.dashboard_stats(), "bind": "127.0.0.1"},
         )
 
     @app.get("/requests/{request_id}", response_class=HTMLResponse)

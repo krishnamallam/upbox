@@ -1,30 +1,42 @@
-<div class="detail-card">
-  <div class="detail-head">
-    <span class="tag">{{ row['tool'] or 'Unknown' }}</span>
-    <strong>{{ row['method'] }}</strong>
-    <span>{{ row['scheme'] }}://{{ row['host'] }}{{ row['path'] }}</span>
-    {% if row['blocked'] %}<span class="tag tag-block">BLOCKED</span>{% endif %}
+{% set ic = icon_for(row['tool']) %}
+{% set redacted = row['redactions_applied_json'] is not none %}
+{% set blocked = row['blocked'] %}
+
+<div class="detail-row">
+  <div class="detail-cell">
+    <div class="detail-cell-label">Tool</div>
+    <div class="detail-cell-value">
+      <span class="tool-icon tool-icon-sm tool-icon-{{ ic.code }}">{{ ic.monogram }}</span>
+      {{ row['tool'] or 'Unknown' }}
+    </div>
   </div>
-  <dl class="kv">
-    <dt>Time</dt>            <dd>{{ row['ts'] }}</dd>
-    <dt>Status</dt>          <dd>{{ row['status'] or '—' }}</dd>
-    <dt>Request size</dt>    <dd>{{ row['req_bytes'] | bytes }}</dd>
-    <dt>Response size</dt>   <dd>{{ row['resp_bytes'] | bytes }}</dd>
-    <dt>Body hash</dt>       <dd class="mono small">{{ row['body_hash'] or '—' }}</dd>
-    {% if row['redactions_applied_json'] %}
-    <dt>Redactions</dt>      <dd class="mono small">{{ row['redactions_applied_json'] }}</dd>
-    {% endif %}
-  </dl>
-  <details class="collapsible">
-    <summary>Headers ({{ headers | length }})</summary>
-    <dl class="kv">
-      {% for k, v in headers.items() %}
-      <dt class="mono">{{ k }}</dt><dd class="mono">{{ v }}</dd>
-      {% endfor %}
-    </dl>
-  </details>
-  <details class="collapsible" open>
-    <summary>Body excerpt (first 4 KB)</summary>
-    <pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
-  </details>
+  <div class="detail-cell">
+    <div class="detail-cell-label">Destination</div>
+    <div class="detail-cell-value mono" title="{{ row['host'] }}{{ row['path'] }}">{{ row['host'] }}{{ row['path'] }}</div>
+  </div>
+  <div class="detail-cell">
+    <div class="detail-cell-label">SHA-256</div>
+    <div class="detail-cell-value mono">{{ (row['body_hash'][:8] + '…') if row['body_hash'] else '—' }}</div>
+  </div>
+  <div class="detail-cell">
+    <div class="detail-cell-label">Forwarded</div>
+    <div class="detail-cell-value">
+      {% if blocked %}
+        <span class="badge badge-blocked">blocked</span>
+      {% elif redacted %}
+        <span class="badge badge-redacted">redacted</span>
+      {% else %}
+        <span class="badge badge-forwarded">yes</span>
+      {% endif %}
+    </div>
+  </div>
 </div>
+
+<div class="body-label">Request body (4 KB excerpt)</div>
+<pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
+
+<details style="margin-top: 12px;">
+  <summary class="body-label" style="cursor: pointer;">Headers ({{ headers | length }})</summary>
+  <pre class="body" style="margin-top: 6px;">{% for k, v in headers.items() %}{{ k }}: {{ v }}
+{% endfor %}</pre>
+</details>

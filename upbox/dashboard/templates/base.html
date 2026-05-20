@@ -7,17 +7,12 @@
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><strong>upbox</strong> <span class="muted">local proxy audit</span></div>
-    <nav class="topnav">
-      <a href="/" class="muted">Feed</a>
-      <a href="/settings" class="muted">Settings</a>
-      <span class="muted small">· 127.0.0.1 · local-only</span>
-    </nav>
-  </header>
-  <main>
-    {% block main %}{% endblock %}
-  </main>
+  <div class="shell">
+    {% block sidebar %}{% endblock %}
+    <main class="main">
+      {% block main %}{% endblock %}
+    </main>
+  </div>
   <script src="/static/dashboard.js"></script>
 </body>
 </html>

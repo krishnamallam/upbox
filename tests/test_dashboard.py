@@ -58,7 +58,9 @@ def test_recent_partial_returns_html(client: TestClient) -> None:
     response = client.get("/requests/recent")
 
     assert response.status_code == 200
-    assert "Cursor" in response.text
+    # Feed partial renders rows with the tool's monogram icon ("Cs" for Cursor)
+    # plus the request host/path. Full tool name lives in the sidebar partial.
+    assert "api.cursor.sh" in response.text
 
 
 def test_detail_returns_404_for_missing_id(client: TestClient) -> None:
@@ -79,3 +81,26 @@ def test_run_rejects_non_loopback_host() -> None:
 
     with pytest.raises(ValueError, match="loopback"):
         run(host="0.0.0.0", port=8800)
+
+
+def test_sidebar_partial_includes_tool_with_icon(client: TestClient) -> None:
+    response = client.get("/sidebar")
+
+    assert response.status_code == 200
+    # Tool name in full + the Cursor monogram class
+    assert "Cursor" in response.text
+    assert "tool-icon-cs" in response.text
+
+
+def test_stats_partial_reports_total_count(client: TestClient) -> None:
+    response = client.get("/stats")
+
+    assert response.status_code == 200
+    assert "Requests" in response.text
+
+
+def test_index_filters_by_tool_query_param(populated_db: Path) -> None:
+    with TestClient(create_app(populated_db)) as c:
+        response = c.get("/?tool=NonExistent")
+
+    assert "No requests captured for" in response.text
