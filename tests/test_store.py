@@ -128,3 +128,85 @@ def test_export_csv_writes_header_when_empty(tmp_store: Store) -> None:
 
     assert written == 0
     assert "ts" in buf.getvalue().splitlines()[0]
+
+
+def test_query_filtered_status_blocked(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(blocked=1))
+    tmp_store.insert_request(_make_record(blocked=0))
+
+    rows = tmp_store.query_filtered(status="blocked")
+
+    assert len(rows) == 1
+    assert rows[0]["blocked"] == 1
+
+
+def test_query_filtered_status_redacted(tmp_store: Store) -> None:
+    redaction_a = json.dumps([{"rule": "a"}])
+    redaction_b = json.dumps([{"rule": "b"}])
+    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=None))
+    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=redaction_a))
+    tmp_store.insert_request(_make_record(blocked=1, redactions_applied_json=redaction_b))
+
+    rows = tmp_store.query_filtered(status="redacted")
+
+    assert len(rows) == 1
+    assert rows[0]["redactions_applied_json"] is not None
+    assert rows[0]["blocked"] == 0
+
+
+def test_query_filtered_status_forwarded(tmp_store: Store) -> None:
+    redaction = json.dumps([{"rule": "a"}])
+    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=None))
+    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=redaction))
+    tmp_store.insert_request(_make_record(blocked=1))
+
+    rows = tmp_store.query_filtered(status="forwarded")
+
+    assert len(rows) == 1
+    assert rows[0]["blocked"] == 0
+    assert rows[0]["redactions_applied_json"] is None
+
+
+def test_query_filtered_search_matches_host(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(host="api.cursor.sh"))
+    tmp_store.insert_request(_make_record(host="api.anthropic.com"))
+
+    rows = tmp_store.query_filtered(search="cursor")
+
+    assert len(rows) == 1
+    assert rows[0]["host"] == "api.cursor.sh"
+
+
+def test_query_filtered_search_is_case_insensitive(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(host="API.Cursor.SH"))
+
+    rows = tmp_store.query_filtered(search="cursor")
+
+    assert len(rows) == 1
+
+
+def test_query_filtered_limit_caps_results(tmp_store: Store) -> None:
+    for _ in range(5):
+        tmp_store.insert_request(_make_record())
+
+    rows = tmp_store.query_filtered(limit=3)
+
+    assert len(rows) == 3
+
+
+def test_query_filtered_order_desc_returns_newest_first(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(host="first.com"))
+    tmp_store.insert_request(_make_record(host="second.com"))
+
+    rows = tmp_store.query_filtered(order="DESC")
+
+    assert rows[0]["host"] == "second.com"
+
+
+def test_dashboard_stats_reports_total_bytes(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(req_bytes=100))
+    tmp_store.insert_request(_make_record(req_bytes=250))
+
+    stats = tmp_store.dashboard_stats()
+
+    assert stats["total_bytes"] == 350

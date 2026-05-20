@@ -2,13 +2,25 @@
 
 {% block sidebar %}
 <aside class="sidebar">
-  <div class="sidebar-brand">
-    <strong>upbox</strong>
-    <small>local proxy audit</small>
+  <div class="sb-brand">
+    <span class="mark">u</span>
+    <div>
+      <strong>upbox</strong>
+      <small>127.0.0.1:8800</small>
+    </div>
   </div>
-  <div class="sidebar-section">Dashboard</div>
-  <a href="/" class="sidebar-link">Live feed <span class="shortcut">F</span></a>
-  <a href="/settings" class="sidebar-link active">Settings</a>
+  <div class="sb-section">Dashboard</div>
+  <a href="/" class="sb-link">Live feed <span class="shortcut">F</span></a>
+  <a href="/settings" class="sb-link">Rules</a>
+  <a href="/settings" class="sb-link">Audit</a>
+  <a href="/settings" class="sb-link active">Settings</a>
+  <a href="/settings" class="sb-link">Doctor</a>
+  <div class="sb-spacer"></div>
+  <div class="sb-status">
+    <span class="dot"></span>
+    <span>proxy <b>:8888</b></span>
+    <span style="margin-left: auto;">CA <b>3/3</b></span>
+  </div>
 </aside>
 {% endblock %}
 

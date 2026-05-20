@@ -1,0 +1,18 @@
+<div class="sec-h">Request headers ({{ headers | length }})</div>
+{% if headers %}
+  <div class="headers">
+    {% for k, v in headers.items() %}
+      <div class="row">
+        <span class="k">{{ k }}</span>
+        {% set vstr = v | string %}
+        {% if '[REDACTED' in vstr %}
+          <span class="v red">{{ vstr }}</span>
+        {% else %}
+          <span class="v">{{ vstr }}</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="muted small">No headers captured.</p>
+{% endif %}

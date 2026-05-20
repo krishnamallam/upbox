@@ -1,29 +1,40 @@
 <aside class="sidebar" id="sidebar">
-  <div class="sidebar-brand">
-    <strong>upbox</strong>
-    <small>local proxy audit</small>
+  <div class="sb-brand">
+    <span class="mark">u</span>
+    <div>
+      <strong>upbox</strong>
+      <small>127.0.0.1:8800</small>
+    </div>
   </div>
 
-  <div class="sidebar-section">Dashboard</div>
-  <a href="/" class="sidebar-link {% if not selected_tool %}active{% endif %}">
+  <div class="sb-section">Dashboard</div>
+  <a href="/" class="sb-link {% if not selected_tool %}active{% endif %}">
     Live feed
     <span class="shortcut">F</span>
   </a>
-  <a href="/settings" class="sidebar-link">Tools</a>
-  <a href="/settings" class="sidebar-link">Rules</a>
-  <a href="/settings" class="sidebar-link">Audit log</a>
-  <a href="/settings" class="sidebar-link">Settings</a>
+  <a href="/settings" class="sb-link">Rules</a>
+  <a href="/settings" class="sb-link">Audit</a>
+  <a href="/settings" class="sb-link">Settings</a>
+  <a href="/settings" class="sb-link">Doctor</a>
 
-  <div class="sidebar-section">Tools</div>
+  <div class="sb-section">Tools</div>
   {% for t in tools %}
     {% set ic = icon_for(t['tool']) %}
     <a href="/?tool={{ t['tool'] | urlencode }}"
-       class="sidebar-tool {% if selected_tool == t['tool'] %}active{% endif %}">
-      <span class="tool-icon tool-icon-sm tool-icon-{{ ic.code }}">{{ ic.monogram }}</span>
-      <span>{{ t['tool'] }}</span>
-      <span class="count">{{ t['request_count'] }}</span>
+       class="sb-tool {% if selected_tool == t['tool'] %}active{% endif %}">
+      <span class="tool-icon tool-icon-{{ ic.code }}"></span>
+      <span class="lbl">{{ t['tool'] }}</span>
+      <span class="n">{{ t['request_count'] }}</span>
     </a>
   {% else %}
-    <div class="sidebar-link muted small" style="cursor: default;">No traffic yet</div>
+    <div class="sb-empty">No traffic yet</div>
   {% endfor %}
+
+  <div class="sb-spacer"></div>
+
+  <div class="sb-status">
+    <span class="dot"></span>
+    <span>proxy <b>:8888</b></span>
+    <span style="margin-left: auto;">CA <b>3/3</b></span>
+  </div>
 </aside>

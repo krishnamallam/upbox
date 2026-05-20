@@ -1,22 +1,51 @@
-<div class="stat">
-  <div class="stat-value">{{ stats['total'] or 0 }}</div>
-  <div class="stat-label">Requests</div>
-</div>
-<div class="stat">
-  <div class="stat-value">{{ stats['redacted'] or 0 }}</div>
-  <div class="stat-label">Redacted</div>
-</div>
-<div class="stat">
-  <div class="stat-value">{{ stats['blocked'] or 0 }}</div>
-  <div class="stat-label">Blocked</div>
-</div>
-<div class="stat">
-  <div class="stat-value mono" style="font-size: 14px;">{{ bind }}</div>
-  <div class="stat-label">Bind</div>
-</div>
-<div class="stats-actions">
-  <button id="btn-pause" class="btn-pause" type="button">
+{% set status = current_status or 'all' %}
+{% set range = current_range or 'All' %}
+{% set tool = selected_tool %}
+{% set q = current_query or '' %}
+
+{# Preserve range/tool/q while changing status — minimal duplicate of filter_bar's link macro. #}
+{% macro stat_link(set_status, base='/') -%}
+  {%- set parts = [] -%}
+  {%- if range and range != 'All' %}{% set _ = parts.append('range=' + range) %}{% endif -%}
+  {%- if set_status and set_status != 'all' %}{% set _ = parts.append('status=' + set_status) %}{% endif -%}
+  {%- if tool %}{% set _ = parts.append('tool=' + (tool | urlencode)) %}{% endif -%}
+  {%- if q %}{% set _ = parts.append('q=' + (q | urlencode)) %}{% endif -%}
+  {{ base }}{% if parts %}?{{ parts | join('&') }}{% endif %}
+{%- endmacro %}
+
+<a href="{{ stat_link('all') }}" class="stat-cell {% if status == 'all' %}on{% endif %}" title="Show all requests">
+  <div class="lbl">Requests · 24h</div>
+  <div class="val">{{ '{:,}'.format(stats['total'] or 0) }}</div>
+</a>
+<button type="button" class="stat-cell" disabled title="Bytes captured (last 24h)">
+  <div class="lbl">Bytes captured</div>
+  <div class="val">{{ stats['total_bytes'] | bytes if stats['total_bytes'] is not none else '0 B' }}</div>
+</button>
+<a href="{{ stat_link('redacted') }}" class="stat-cell {% if status == 'redacted' %}on{% endif %}" title="Filter → redacted">
+  <div class="lbl">Redacted</div>
+  <div class="val warn">{{ stats['redacted'] or 0 }}</div>
+</a>
+<a href="{{ stat_link('blocked') }}" class="stat-cell {% if status == 'blocked' %}on{% endif %}" title="Filter → blocked">
+  <div class="lbl">Blocked</div>
+  <div class="val bad">{{ stats['blocked'] or 0 }}</div>
+</a>
+<div class="stats-right">
+  <div class="theme-pick" role="group" aria-label="Theme">
+    <button type="button" id="theme-dark" class="on" title="Dark theme" aria-label="Dark theme">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+        <path d="M6 1a7 7 0 1 0 9 9A6 6 0 0 1 6 1z"/>
+      </svg>
+    </button>
+    <button type="button" id="theme-light" title="Light theme" aria-label="Light theme">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <circle cx="8" cy="8" r="3"/>
+        <path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M2.8 2.8l1.1 1.1M12.1 12.1l1.1 1.1M2.8 13.2l1.1-1.1M12.1 3.9l1.1-1.1" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+  <button id="btn-pause" class="btn" type="button" title="Pause the live feed (Space)">
     <span id="pause-label">⏸ Pause</span>
   </button>
-  <span id="live-indicator" class="live-indicator">Live</span>
+  <a class="btn" href="{{ stat_link(status, base='/export') }}" title="Export the filtered rows as JSONL">↓ Export</a>
+  <span id="live-indicator" class="live">Live</span>
 </div>

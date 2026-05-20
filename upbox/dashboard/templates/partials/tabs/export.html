@@ -1,0 +1,20 @@
+<div class="sec-h">Replay as curl</div>
+<div class="curl">
+  <button type="button" class="copy" data-copy-target=".curl-cmd-1">copy</button>
+  <code class="curl-cmd-1"><span class="flag">curl</span> -X <span class="lit">{{ row['method'] }}</span> \
+  <span class="lit">{{ row['scheme'] }}://{{ row['host'] }}{{ row['path'] }}</span> \
+  <span class="flag">--proxy</span> <span class="lit">http://127.0.0.1:8888</span> \
+  <span class="flag">--data-binary</span> <span class="lit">@req-{{ '%06d' % row['id'] }}.bin</span></code>
+</div>
+
+<div class="sec-h">Export from CLI</div>
+<div class="curl">
+  <button type="button" class="copy" data-copy-target=".curl-cmd-2">copy</button>
+  <code class="curl-cmd-2"><span class="flag">upbox</span> export <span class="flag">--since</span> <span class="lit">1h</span>{% if row['tool'] %} <span class="flag">--tool</span> <span class="lit">"{{ row['tool'] }}"</span>{% endif %} <span class="flag">-o</span> <span class="lit">audit.jsonl</span></code>
+</div>
+
+<div class="sec-h">This request as JSONL</div>
+<div class="curl">
+  <a class="copy" href="/export?range=All&amp;status=all" style="text-decoration: none;">↓ download</a>
+  <code>request id <span class="lit">{{ '%06d' % row['id'] }}</span> · sha <span class="lit">{{ row['body_hash'] or '—' }}</span></code>
+</div>

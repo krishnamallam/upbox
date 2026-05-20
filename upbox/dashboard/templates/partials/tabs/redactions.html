@@ -1,0 +1,20 @@
+<div class="sec-h">Redactions applied to this request</div>
+{% if redactions %}
+  <div class="red-list">
+    {% for r in redactions %}
+      <div class="row">
+        <span class="pill">{{ r.get('rule') or r.get('name') or 'redaction' }}</span>
+        <span class="where">
+          {% if r.get('where') %}
+            at <b>{{ r.get('where') }}</b>
+          {% else %}
+            applied to body
+          {% endif %}
+        </span>
+        <span class="n">×{{ r.get('count', 1) }}</span>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="muted small">No redactions applied. Body forwarded as-is.</p>
+{% endif %}

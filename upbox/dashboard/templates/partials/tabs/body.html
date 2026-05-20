@@ -1,0 +1,6 @@
+<div class="sec-h">Request body (4 KB excerpt)</div>
+{% if row['body_excerpt'] %}
+  <pre class="body">{{ row['body_excerpt'] | redact_marks }}</pre>
+{% else %}
+  <pre class="body">(empty)</pre>
+{% endif %}

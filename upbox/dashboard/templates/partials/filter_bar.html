@@ -1,0 +1,60 @@
+{% set range = current_range or 'All' %}
+{% set status = current_status or 'all' %}
+{% set tool = selected_tool %}
+{% set q = current_query or '' %}
+
+{# Build a clean query-string preserving the OTHER filters when changing one. #}
+{% macro link(set_range=None, set_status=None, set_tool='__keep__', set_q=None) -%}
+  {%- set parts = [] -%}
+  {%- set use_range = set_range if set_range is not none else range -%}
+  {%- set use_status = set_status if set_status is not none else status -%}
+  {%- set use_tool = (tool if set_tool == '__keep__' else set_tool) -%}
+  {%- set use_q = set_q if set_q is not none else q -%}
+  {%- if use_range and use_range != 'All' %}{% set _ = parts.append('range=' + use_range) %}{% endif -%}
+  {%- if use_status and use_status != 'all' %}{% set _ = parts.append('status=' + use_status) %}{% endif -%}
+  {%- if use_tool %}{% set _ = parts.append('tool=' + (use_tool | urlencode)) %}{% endif -%}
+  {%- if use_q %}{% set _ = parts.append('q=' + (use_q | urlencode)) %}{% endif -%}
+  /{% if parts %}?{{ parts | join('&') }}{% endif %}
+{%- endmacro %}
+
+<div class="filter-bar" id="filter-bar">
+  <div class="seg" role="group" aria-label="Time range">
+    {% for r in ['5m', '1h', '24h', 'All'] %}
+      <a href="{{ link(set_range=r) }}" class="{% if range == r %}on{% endif %}">{{ r }}</a>
+    {% endfor %}
+  </div>
+  <div class="seg" role="group" aria-label="Status">
+    {% for s, lbl in [('all','All'), ('forwarded','Forwarded'), ('redacted','Redacted'), ('blocked','Blocked')] %}
+      <a href="{{ link(set_status=s) }}" class="{% if status == s %}on{% endif %}">{{ lbl }}</a>
+    {% endfor %}
+  </div>
+
+  {% set has_filters = (range != 'All') or (status != 'all') or tool or q %}
+  {% if has_filters %}
+    <div class="active-filters">
+      <span class="showing"><b>{{ visible_count or 0 }}</b> of <b>{{ stats['total'] or 0 }}</b></span>
+      {% if status != 'all' %}
+        <a class="af af-status" href="{{ link(set_status='all') }}" title="Clear status filter">{{ status }}<span class="x">×</span></a>
+      {% endif %}
+      {% if tool %}
+        <a class="af af-tool" href="{{ link(set_tool=None) }}" title="Clear tool filter">{{ tool }}<span class="x">×</span></a>
+      {% endif %}
+      {% if range != 'All' %}
+        <a class="af af-time" href="{{ link(set_range='All') }}" title="Clear time filter">{{ range }}<span class="x">×</span></a>
+      {% endif %}
+      {% if q %}
+        <a class="af" href="{{ link(set_q=None) }}" title="Clear search">{{ q }}<span class="x">×</span></a>
+      {% endif %}
+      <a class="clear-all" href="/" title="Clear all filters">Clear all</a>
+    </div>
+  {% endif %}
+
+  <form class="search" action="/" method="get" role="search" aria-label="Search requests">
+    {% if range != 'All' %}<input type="hidden" name="range" value="{{ range }}">{% endif %}
+    {% if status != 'all' %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    {% if tool %}<input type="hidden" name="tool" value="{{ tool }}">{% endif %}
+    <span>⌕</span>
+    <input id="search-input" type="search" name="q" value="{{ q }}" placeholder="Search host, path, rule…   try host: rule: tool:" autocomplete="off">
+    <span class="kbd">/</span>
+  </form>
+</div>

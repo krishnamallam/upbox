@@ -126,8 +126,18 @@ class Store:
         since: str | None = None,
         until: str | None = None,
         tool: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        order: str = "ASC",
+        limit: int | None = None,
     ) -> list[sqlite3.Row]:
-        """Filtered query for export. All filters are AND-combined."""
+        """Filtered query. All filters are AND-combined.
+
+        ``status`` is one of ``forwarded``/``redacted``/``blocked`` and shapes
+        the badge on each row. ``search`` matches against host, path, and tool
+        with case-insensitive LIKE — callers escape ``%`` / ``_`` themselves
+        or accept that those become wildcards.
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if since:
@@ -139,22 +149,39 @@ class Store:
         if tool:
             clauses.append("tool = ?")
             params.append(tool)
+        if status == "blocked":
+            clauses.append("blocked = 1")
+        elif status == "redacted":
+            clauses.append("blocked = 0 AND redactions_applied_json IS NOT NULL")
+        elif status == "forwarded":
+            clauses.append("blocked = 0 AND redactions_applied_json IS NULL")
+        if search:
+            pattern = f"%{search}%"
+            clauses.append(
+                "(LOWER(host) LIKE LOWER(?)"
+                " OR LOWER(path) LIKE LOWER(?)"
+                " OR LOWER(COALESCE(tool, '')) LIKE LOWER(?))"
+            )
+            params.extend([pattern, pattern, pattern])
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        order_clause = "DESC" if order.upper() == "DESC" else "ASC"
+        limit_clause = f" LIMIT {int(limit)}" if limit else ""
         return list(
             self._conn.execute(
-                f"SELECT * FROM requests {where} ORDER BY id",
+                f"SELECT * FROM requests {where} ORDER BY id {order_clause}{limit_clause}",
                 tuple(params),
             )
         )
 
     def dashboard_stats(self) -> sqlite3.Row:
-        """Aggregate counts for the dashboard stats bar (total / redacted / blocked)."""
+        """Aggregate counts for the stats bar: total / redacted / blocked / total_bytes."""
         row = self._conn.execute(
             """
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN redactions_applied_json IS NOT NULL THEN 1 ELSE 0 END) AS redacted,
-                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked
+                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked,
+                COALESCE(SUM(req_bytes), 0) AS total_bytes
             FROM requests
             """
         ).fetchone()

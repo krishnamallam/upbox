@@ -1,0 +1,37 @@
+{% set blocked = row['blocked'] %}
+{% set redaction_count = redactions | length %}
+<div class="allowlist">
+  <div class="head">
+    {% if blocked %}
+      <span class="ic" style="color: var(--danger);">✗</span>
+      <span style="color: var(--danger);">Blocked — destination not on allowlist</span>
+    {% else %}
+      <span class="ic" style="color: var(--accent-2);">✓</span>
+      <span style="color: var(--accent-2);">Allowed — destination matches policy</span>
+    {% endif %}
+  </div>
+  <ul>
+    <li class="{% if blocked %}bad{% else %}match{% endif %}">
+      <span>{% if blocked %}✗{% else %}✓{% endif %}</span>
+      <span>
+        <b>{{ row['host'] }}</b>
+        {% if blocked %} is not on{% else %} is on{% endif %}
+        the {{ row['tool'] or 'Unknown' }} allowlist
+      </span>
+    </li>
+    <li class="match">
+      <span>✓</span>
+      <span>TLS handshake completed ({{ row['scheme'] }})</span>
+    </li>
+    <li class="{% if redaction_count %}warn{% else %}match{% endif %}">
+      <span>{% if redaction_count %}⚠{% else %}✓{% endif %}</span>
+      <span>
+        {% if redaction_count %}
+          {{ redaction_count }} secret pattern{{ '' if redaction_count == 1 else 's' }} stripped before forward
+        {% else %}
+          no secrets matched the redaction rules
+        {% endif %}
+      </span>
+    </li>
+  </ul>
+</div>
