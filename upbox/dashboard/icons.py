@@ -29,9 +29,15 @@ TOOL_ICONS: dict[str, ToolIcon] = {
     "GitHub Copilot": ToolIcon("Co", "co"),
     "ChatGPT": ToolIcon("Gp", "gp"),
     "Codeium": ToolIcon("Cd", "cd"),
+    "Windsurf": ToolIcon("Ws", "ws"),
     "Google Gemini": ToolIcon("Gm", "gm"),
     "OpenAI API": ToolIcon("Oa", "oa"),
     "Anthropic API": ToolIcon("An", "an"),
+    "Continue": ToolIcon("Cn", "cn"),
+    "Cody": ToolIcon("Cy", "cy"),
+    "Perplexity": ToolIcon("Px", "px"),
+    "Tabnine": ToolIcon("Tn", "tn"),
+    "Replit AI": ToolIcon("Rp", "rp"),
 }
 
 

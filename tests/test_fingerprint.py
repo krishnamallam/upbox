@@ -190,3 +190,58 @@ def test_bundled_rules_load_successfully() -> None:
     rules = load_rules()
 
     assert any(r.name == "Cursor" for r in rules)
+
+
+def test_bundled_rules_cover_expanded_tools() -> None:
+    # Regression: the expanded tools.yaml must include the new entries so
+    # they show up in the dashboard sidebar and contribute to the TLS
+    # allowlist. Lock in the names; if any get renamed, the test fails
+    # loudly instead of silently dropping a tool.
+    from upbox.addons.fingerprint import load_rules
+
+    names = {r.name for r in load_rules()}
+
+    assert {"Windsurf", "Continue", "Cody", "Perplexity", "Tabnine"} <= names
+
+
+def test_bundled_rules_cover_new_cursor_subdomains() -> None:
+    # api3.cursor.sh / api5.cursor.sh / repo42.cursor.sh weren't in the
+    # old allowlist. Without them, much of Cursor's actual traffic was
+    # blocked silently.
+    from upbox.addons.fingerprint import load_allowed_host_patterns
+
+    patterns = load_allowed_host_patterns()
+
+    assert any("api3\\.cursor\\.sh" in p for p in patterns)
+    assert any("api5\\.cursor\\.sh" in p for p in patterns)
+    assert any("repo42\\.cursor\\.sh" in p for p in patterns)
+
+
+def test_bundled_rules_disambiguate_claude_code_from_anthropic_api() -> None:
+    # Order matters: a request to api.anthropic.com WITH `claude-code`
+    # in the UA must tag as "Claude Code", not the generic "Anthropic API"
+    # catch-all that lives later in the file.
+    addon = FingerprintAddon()  # uses the real bundled rules
+    flow = _flow(host="api.anthropic.com", ua="claude-code/1.2.3")
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "Claude Code"
+
+
+def test_bundled_rules_match_chatgpt_ua_on_chatgpt_com() -> None:
+    addon = FingerprintAddon()
+    flow = _flow(host="chatgpt.com", ua="ChatGPT/1.2024.123 (Mac)")
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "ChatGPT"
+
+
+def test_bundled_rules_match_perplexity_host_only() -> None:
+    addon = FingerprintAddon()
+    flow = _flow(host="api.perplexity.ai")
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "Perplexity"

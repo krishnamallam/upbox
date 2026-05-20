@@ -27,6 +27,12 @@
   --tool-gm: #88c5d2;
   --tool-oa: #82c79a;
   --tool-an: #e3a78d;
+  --tool-ws: #8fd6cf;
+  --tool-cn: #9aa9e8;
+  --tool-cy: #cda8e0;
+  --tool-px: #6fb0c7;
+  --tool-tn: #d3e0a0;
+  --tool-rp: #f0b377;
   --tool-default: #6b6e75;
 }
 
@@ -156,6 +162,12 @@ html, body {
 .tool-icon-gm { background: var(--tool-gm); }
 .tool-icon-oa { background: var(--tool-oa); }
 .tool-icon-an { background: var(--tool-an); }
+.tool-icon-ws { background: var(--tool-ws); }
+.tool-icon-cn { background: var(--tool-cn); }
+.tool-icon-cy { background: var(--tool-cy); }
+.tool-icon-px { background: var(--tool-px); }
+.tool-icon-tn { background: var(--tool-tn); }
+.tool-icon-rp { background: var(--tool-rp); }
 .tool-icon-default { background: var(--tool-default); color: var(--fg); }
 
 .tool-icon-sm {

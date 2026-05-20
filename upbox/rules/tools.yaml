@@ -1,45 +1,210 @@
-# Tool fingerprints for upbox. Each rule is matched on a request as it
-# arrives at the proxy. ALL fields specified under `match` must hold for
-# the rule to match. Rules are evaluated in order; first match wins.
+# Tool fingerprints for upbox.
+#
+# Each rule is matched against an HTTPS request as it arrives at the proxy.
+# ALL fields under `match` must hold for the rule to match. Rules are
+# evaluated top-to-bottom; first match wins. Order matters — specific
+# rules (UA + host) MUST come before generic catch-alls (host-only) so
+# that, e.g., a Claude-Code-flavored request to api.anthropic.com is
+# tagged "Claude Code" and not the generic "Anthropic API".
+#
+# The unique union of `hosts` across all rules is what upbox sends to
+# mitmproxy as the TLS allowlist (Options.allow_hosts). Everything not
+# in that list passes through untouched — pinned-cert apps like Outlook
+# and banking apps keep working, and the dashboard stays focused on AI
+# traffic.
+#
+# When adding a new tool: prefer the specific (UA-bearing) form first,
+# then add a generic host-only catch-all if the tool shares hosts with
+# its provider's API.
+
+# --- Specific rules (UA / header + host) ---
 
 - name: Claude Desktop
   match:
-    hosts: ["api.anthropic.com"]
+    hosts:
+      - api.anthropic.com
+      - a-api.anthropic.com
+      - claude.ai
+      - statsig.anthropic.com
     headers: ["x-app: claude-desktop"]
 
 - name: Claude Code
   match:
     ua_contains: ["claude-code", "anthropic-ai/sdk"]
-    hosts: ["api.anthropic.com"]
+    hosts:
+      - api.anthropic.com
+      - a-api.anthropic.com
+      - claude.ai
+      - statsig.anthropic.com
+      - console.anthropic.com
 
 - name: Cursor
   match:
     ua_contains: ["Cursor/"]
-    hosts: ["api.cursor.sh", "api2.cursor.sh"]
+    hosts:
+      - cursor.com
+      - api.cursor.com
+      - api2.cursor.sh
+      - api3.cursor.sh
+      - api4.cursor.sh
+      - api5.cursor.sh
+      - agent.api5.cursor.sh
+      - agentn.api5.cursor.sh
+      - repo42.cursor.sh
+      - us-asia.gcpp.cursor.sh
+      - us-eu.gcpp.cursor.sh
+      - us-only.gcpp.cursor.sh
+      - authenticate.cursor.sh
+      - authenticator.cursor.sh
+      - metrics.cursor.sh
+      - downloader.cursor.sh
+      - cursor-cdn.com
+      - downloads.cursor.com
+      - marketplace.cursorapi.com
+      - api.cursorapi.com
+      - download.todesktop.com
+      - anysphere-binaries.s3.us-east-1.amazonaws.com
 
 - name: GitHub Copilot
   match:
-    ua_contains: ["GitHubCopilot", "copilot-"]
-    hosts: ["api.githubcopilot.com", "copilot-proxy.githubusercontent.com"]
+    ua_contains: ["GitHubCopilot", "copilot-", "Copilot/"]
+    hosts:
+      - api.githubcopilot.com
+      - api.individual.githubcopilot.com
+      - api.business.githubcopilot.com
+      - api.enterprise.githubcopilot.com
+      - proxy.individual.githubcopilot.com
+      - proxy.business.githubcopilot.com
+      - proxy.enterprise.githubcopilot.com
+      - telemetry.individual.githubcopilot.com
+      - telemetry.business.githubcopilot.com
+      - telemetry.enterprise.githubcopilot.com
+      - origin-tracker.githubcopilot.com
+      - copilot-proxy.githubusercontent.com
+      - copilot-telemetry.githubusercontent.com
+      - origin-tracker.githubusercontent.com
 
 - name: ChatGPT
   match:
     ua_contains: ["ChatGPT"]
-    hosts: ["chat.openai.com", "chatgpt.com"]
+    hosts:
+      - chatgpt.com
+      - www.chatgpt.com
+      - chat.openai.com
+      - ab.chatgpt.com
+      - sora.chatgpt.com
+      - operator.chatgpt.com
+      - realtime.chatgpt.com
+      - webrtc.chatgpt.com
+
+- name: Windsurf
+  match:
+    ua_contains: ["windsurf", "Windsurf/"]
+    hosts:
+      - windsurf.com
+      - codeium.com
+      - server.codeium.com
+      - api.codeium.com
+      - web-backend.codeium.com
+      - inference.codeium.com
+      - unleash.codeium.com
 
 - name: Codeium
   match:
     ua_contains: ["codeium"]
-    hosts: ["server.codeium.com"]
+    hosts:
+      - server.codeium.com
+      - api.codeium.com
+      - web-backend.codeium.com
+      - inference.codeium.com
+      - unleash.codeium.com
+      - codeiumdata.com
+
+# --- Generic host-only catch-alls ---
 
 - name: OpenAI API
   match:
-    hosts: ["api.openai.com"]
+    hosts:
+      - api.openai.com
+      - beta.api.openai.com
+      - platform.api.openai.com
+      - platform.openai.com
+      - chatgpt.com
+      - www.chatgpt.com
+      - chat.openai.com
+      - ab.chatgpt.com
+      - sora.chatgpt.com
+      - operator.chatgpt.com
+      - realtime.chatgpt.com
+      - webrtc.chatgpt.com
+      - auth.openai.com
+      - auth0.openai.com
+      - files.oaiusercontent.com
+      - cdn.openai.com
+      - cdn.oaistatic.com
+      - api.oaistatsig.com
+      - files.openai.com
+      - images.openai.com
+      - videos.openai.com
 
 - name: Anthropic API
   match:
-    hosts: ["api.anthropic.com"]
+    hosts:
+      - api.anthropic.com
+      - a-api.anthropic.com
+      - claude.ai
+      - console.anthropic.com
+      - platform.claude.com
+      - statsig.anthropic.com
+      - downloads.claude.ai
+      - bridge.claudeusercontent.com
 
 - name: Google Gemini
   match:
-    hosts: ["generativelanguage.googleapis.com"]
+    hosts:
+      - generativelanguage.googleapis.com
+      - gemini.google.com
+      - aistudio.google.com
+      - cloudcode-pa.googleapis.com
+      - aiplatform.googleapis.com
+      - alkalimakersuite-pa.clients6.google.com
+
+- name: Continue
+  match:
+    hosts:
+      - api.continue.dev
+      - hub.continue.dev
+      - continue.dev
+      - app-test.continue.dev
+      - api-test.continue.dev
+
+- name: Cody
+  match:
+    hosts:
+      - sourcegraph.com
+      - cody-gateway.sourcegraph.com
+      - telemetry-gateway.sourcegraph.com
+      - pings.sourcegraph.com
+
+- name: Perplexity
+  match:
+    hosts:
+      - api.perplexity.ai
+      - www.perplexity.ai
+      - perplexity.ai
+      - r2cdn.perplexity.ai
+      - pplx-next-static-public.perplexity.ai
+
+- name: Tabnine
+  match:
+    hosts:
+      - api.tabnine.com
+      - update.tabnine.com
+      - console.tabnine.com
+      - tabnine.com
+
+- name: Replit AI
+  match:
+    hosts:
+      - replit.com
+      - graphql.replit.com
