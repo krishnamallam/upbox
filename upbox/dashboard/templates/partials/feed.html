@@ -14,7 +14,6 @@
       {% set redacted = row['redactions_applied_json'] is not none %}
       {% set blocked = row['blocked'] %}
       <tr data-id="{{ row['id'] }}"
-          class="{% if loop.index0 == 0 %}new{% endif %}"
           onclick="upboxDetail({{ row['id'] }})"
           title="Click to inspect (↑↓ to navigate)">
         <td class="cell-time">{{ row['ts'] | ago }}</td>

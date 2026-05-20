@@ -58,8 +58,8 @@ def test_recent_partial_returns_html(client: TestClient) -> None:
     response = client.get("/requests/recent")
 
     assert response.status_code == 200
-    # Feed partial renders rows with the tool's monogram icon ("Cs" for Cursor)
-    # plus the request host/path. Full tool name lives in the sidebar partial.
+    # Feed partial renders rows with the tool's color dot + host/path.
+    # The full tool name lives in the sidebar partial.
     assert "api.cursor.sh" in response.text
 
 
@@ -87,7 +87,7 @@ def test_sidebar_partial_includes_tool_with_icon(client: TestClient) -> None:
     response = client.get("/sidebar")
 
     assert response.status_code == 200
-    # Tool name in full + the Cursor monogram class
+    # Tool name + the Cursor color dot class.
     assert "Cursor" in response.text
     assert "tool-icon-cs" in response.text
 

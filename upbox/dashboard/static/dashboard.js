@@ -40,6 +40,10 @@
     return r.ok ? await r.text() : null;
   }
 
+  // Track the highest request id we've shown so we can flag genuinely new
+  // rows when the feed refreshes (the CSS `.new` class drives the pulse).
+  let maxSeenId = 0;
+
   async function refreshFeed() {
     if (paused || !feed) return;
     try {
@@ -49,7 +53,10 @@
         fetchText("/sidebar" + q),
         fetchText("/stats" + q),
       ]);
-      if (feedHtml !== null) replaceFromHtml(feed, feedHtml);
+      if (feedHtml !== null) {
+        replaceFromHtml(feed, feedHtml);
+        markNewRows();
+      }
       if (sidebarHtml !== null && sidebar) {
         // /sidebar returns the full <aside> wrapper; copy its inner content
         // so our existing wrapper stays mounted.
@@ -61,6 +68,19 @@
       wireStatsBar();
     } catch (e) {
       // Silent — local dashboard, transient errors aren't actionable.
+    }
+  }
+
+  function markNewRows() {
+    if (!feed) return;
+    const rows = feed.querySelectorAll("table.feed tbody tr[data-id]");
+    rows.forEach(function (tr) {
+      const id = Number(tr.getAttribute("data-id"));
+      if (id > maxSeenId) tr.classList.add("new");
+    });
+    if (rows.length > 0) {
+      const topId = Number(rows[0].getAttribute("data-id"));
+      if (topId > maxSeenId) maxSeenId = topId;
     }
   }
 
@@ -198,22 +218,73 @@
     }
   } catch (e) { /* private mode */ }
 
+  function selectAdjacentRow(direction) {
+    if (!feed) return;
+    const rows = Array.from(feed.querySelectorAll("table.feed tbody tr[data-id]"));
+    if (rows.length === 0) return;
+    const current = rows.findIndex((tr) => tr.classList.contains("sel"));
+    let next;
+    if (current === -1) {
+      next = direction > 0 ? 0 : rows.length - 1;
+    } else {
+      next = Math.max(0, Math.min(rows.length - 1, current + direction));
+    }
+    const id = Number(rows[next].getAttribute("data-id"));
+    if (id) window.upboxDetail(id);
+    rows[next].scrollIntoView({ block: "nearest" });
+  }
+
+  function focusSearch() {
+    const input = document.getElementById("search-input");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }
+
+  function hasActiveFilters() {
+    const u = new URL(window.location.href);
+    return ["range", "status", "tool", "q"].some((k) => u.searchParams.has(k));
+  }
+
   document.addEventListener("keydown", function (ev) {
     const inField = ev.target && ["INPUT", "TEXTAREA"].includes(ev.target.tagName);
+    if (ev.key === "Escape") {
+      if (inField) {
+        ev.target.blur();
+        return;
+      }
+      if (hasActiveFilters()) {
+        window.location.href = "/";
+        return;
+      }
+      if (detail) {
+        detail.replaceChildren(
+          emptyMessage("Click a request to inspect headers and body excerpt.")
+        );
+      }
+      return;
+    }
     if (inField) return;
-    if (ev.key === "f") {
-      window.location.href = "/";
+    if (ev.key === " ") {
       ev.preventDefault();
-    } else if (ev.key === " ") {
       setPaused(!paused);
+    } else if (ev.key === "/") {
       ev.preventDefault();
-    } else if (ev.key === "Escape" && detail) {
-      detail.replaceChildren(
-        emptyMessage("Click a request to inspect headers and body excerpt.")
-      );
+      focusSearch();
+    } else if (ev.key === "f") {
+      ev.preventDefault();
+      window.location.href = "/";
+    } else if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      selectAdjacentRow(1);
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      selectAdjacentRow(-1);
     }
   });
 
   wireStatsBar();
+  markNewRows();
   setInterval(refreshFeed, REFRESH_MS);
 })();
