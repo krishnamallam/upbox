@@ -18,34 +18,49 @@ this is the publish.
 
 ## Version bump
 
-```sh
-# In pyproject.toml, change:
-#   version = "0.0.1"
-# to:
-#   version = "0.1.0"
+The release PR (`release/v0.1.0`) already does this:
 
-git checkout -b release/v0.1.0
-git commit -am "release: v0.1.0"
+- `pyproject.toml`: `version = "0.1.0"`
+- `upbox/__init__.py`: `__version__ = "0.1.0"`
+- `CHANGELOG.md`: v0.1.0 dated heading
+
+Merge the release PR into `main` first.
+
+## Configure PyPI trusted publishing (one-time)
+
+Trusted publishing means no long-lived token sits in repo secrets.
+Configure once at <https://pypi.org/manage/account/publishing/>:
+
+| Field | Value |
+|---|---|
+| PyPI Project Name | `upbox` |
+| Owner | `krishnamallam` |
+| Repository name | `upbox` |
+| Workflow name | `release.yml` |
+| Environment name | `pypi` |
+
+Then create the matching environment in GitHub
+(`Settings → Environments → New environment → pypi`) — no secrets
+needed inside it.
+
+## Tag and push
+
+```sh
+# On main, with the release commit already merged:
+git pull origin main
 git tag v0.1.0
-```
-
-## PyPI publish
-
-A GitHub Action publishes on tag push. To do it manually:
-
-```sh
-uv build           # produces dist/*.whl and dist/*.tar.gz
-uv publish         # needs PYPI_TOKEN env var
-```
-
-Verify with `pipx install upbox==0.1.0` in a clean shell.
-
-## Push the tag
-
-```sh
-git push origin main
 git push origin v0.1.0
 ```
+
+`.github/workflows/release.yml` triggers on the tag:
+
+1. Verifies the tag matches `pyproject.toml` version (fails fast if
+   they drift).
+2. `uv build` → sdist + wheel.
+3. Publishes to PyPI via trusted publishing.
+4. Creates a GitHub Release with auto-generated notes + artefacts.
+
+Verify with `pipx install upbox==0.1.0` in a clean shell.
 
 ## Launch posts
 

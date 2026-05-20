@@ -1,6 +1,6 @@
 [project]
 name = "upbox"
-version = "0.0.1"
+version = "0.1.0"
 description = "See, audit, and control what your AI tools send to the cloud."
 readme = "README.md"
 license = { file = "LICENSE" }
