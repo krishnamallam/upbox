@@ -82,14 +82,23 @@ def run(
     ),
     host: str = typer.Option("127.0.0.1", help="Proxy host the child should target."),
     port: int = typer.Option(8888, help="Proxy port the child should target."),
+    dashboard_port: int = typer.Option(8800, help="Dashboard port (auto-started)."),
     list_tools: bool = typer.Option(False, "--list", "-l", help="List known tools and exit."),
+    no_start: bool = typer.Option(
+        False, "--no-start", help="Skip auto-starting proxy + dashboard."
+    ),
 ) -> None:
     """Launch an AI tool routed through the upbox proxy.
 
-    Sets HTTPS_PROXY + NODE_EXTRA_CA_CERTS on the child process only, so the
-    rest of the system is unaffected. Chrome receives ``--proxy-server`` and
-    a sandboxed user-data-dir instead, since browsers ignore env-var proxies.
+    Boots `upbox start` (proxy + dashboard) in the background if it isn't
+    already running, then spawns the tool with HTTPS_PROXY +
+    NODE_EXTRA_CA_CERTS set on the child process only. When the tool exits
+    (or you Ctrl+C), the auto-started proxy + dashboard get torn down. If
+    they were already running from another terminal, they're left alone.
     """
+    import subprocess as _subprocess
+    import sys as _sys
+
     from upbox import launchers
 
     if list_tools:
@@ -108,11 +117,45 @@ def run(
         typer.echo(f"Unknown tool: {tool}. Known: {known}", err=True)
         raise typer.Exit(code=1)
 
+    sup_proc: _subprocess.Popen[bytes] | None = None
+    proxy_was_running = launchers.is_listening(host, port)
+    if not proxy_was_running and not no_start:
+        typer.echo(f"upbox: starting proxy on {host}:{port} + dashboard on :{dashboard_port}")
+        sup_proc = _subprocess.Popen(
+            [
+                _sys.executable,
+                "-m",
+                "upbox",
+                "start",
+                "--proxy-port",
+                str(port),
+                "--dashboard-port",
+                str(dashboard_port),
+            ]
+        )
+        if not launchers.wait_for_listening(host, port, timeout=20, sentinel=sup_proc):
+            typer.echo("upbox: proxy did not start in time", err=True)
+            sup_proc.terminate()
+            raise typer.Exit(code=3)
+        typer.echo(f"upbox: dashboard ready at http://127.0.0.1:{dashboard_port}")
+    elif proxy_was_running:
+        typer.echo(f"upbox: proxy already running on {host}:{port} — reusing it")
+
     try:
         rc = launchers.launch(selected, proxy_host=host, proxy_port=port)
     except FileNotFoundError as exc:
         typer.echo(str(exc), err=True)
+        if sup_proc is not None:
+            sup_proc.terminate()
         raise typer.Exit(code=2) from exc
+    finally:
+        if sup_proc is not None:
+            typer.echo("upbox: tearing down proxy + dashboard")
+            sup_proc.terminate()
+            try:
+                sup_proc.wait(timeout=5)
+            except _subprocess.TimeoutExpired:
+                sup_proc.kill()
     raise typer.Exit(code=rc)
 
 

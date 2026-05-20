@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -160,3 +162,36 @@ def test_launch_raises_when_executable_missing(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         launchers.launch(tool, profile_root=tmp_path / "profiles")
+
+
+def test_is_listening_returns_true_for_open_port() -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    port = sock.getsockname()[1]
+    try:
+        assert launchers.is_listening("127.0.0.1", port) is True
+    finally:
+        sock.close()
+
+
+def test_is_listening_returns_false_for_closed_port() -> None:
+    # Find a port that's almost certainly closed by binding then releasing.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    assert launchers.is_listening("127.0.0.1", port, timeout=0.2) is False
+
+
+def test_wait_for_listening_times_out_when_port_never_opens() -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    start = time.monotonic()
+
+    result = launchers.wait_for_listening("127.0.0.1", port, timeout=0.5)
+
+    assert result is False and (time.monotonic() - start) < 2.0

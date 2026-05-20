@@ -6,11 +6,17 @@ through upbox. The fastest path is `upbox run <tool>`.
 
 ## `upbox run <tool>` (recommended)
 
-`upbox run` finds the tool's installed executable, then spawns it as a
-child process with `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS` set (or, for
-browsers, `--proxy-server` and an isolated user-data directory). Only
-that one process is proxied — the rest of the system isn't touched, so
-you can't accidentally cut your machine's internet if upbox crashes.
+`upbox run` is one command. It auto-starts the proxy + dashboard if
+they aren't already up, finds the tool's installed executable, and
+spawns it as a child process with `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`
+set (or, for browsers, `--proxy-server` and an isolated user-data
+directory). When the tool exits — or you Ctrl+C the launcher — the
+auto-started proxy + dashboard get torn down. If you already had
+`upbox start` running in another terminal, that one is left alone and
+reused.
+
+Only the launched process is proxied; the rest of the system isn't
+touched, so a crashed upbox can't cut your machine's internet.
 
 ```sh
 upbox run claude         # Claude Desktop (Electron)

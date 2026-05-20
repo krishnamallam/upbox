@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -177,6 +179,36 @@ def build_args(
         for a in tool.extra_args
     ]
     return [str(exe), *formatted]
+
+
+def is_listening(host: str, port: int, timeout: float = 0.5) -> bool:
+    """True if something is accepting connections on host:port."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_listening(
+    host: str,
+    port: int,
+    timeout: float = 15.0,
+    sentinel: subprocess.Popen[bytes] | None = None,
+) -> bool:
+    """Poll until ``host:port`` accepts a connection, or until ``timeout``.
+
+    If ``sentinel`` is a Popen and it exits before the port opens, give up
+    early — it means the supervisor we started has died.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if is_listening(host, port):
+            return True
+        if sentinel is not None and sentinel.poll() is not None:
+            return False
+        time.sleep(0.25)
+    return False
 
 
 def launch(
