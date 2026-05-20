@@ -5,15 +5,24 @@
 {% endblock %}
 
 {% block main %}
-  <div class="stats-bar" id="stats-bar">
+  <div class="stats" id="stats-bar">
     {% include "partials/stats_bar.html" %}
   </div>
 
-  <section class="feed" id="feed">
-    {% include "partials/feed.html" %}
-  </section>
+  <div class="work">
+    <section class="feed-wrap" id="feed">
+      {% include "partials/feed.html" %}
+    </section>
 
-  <section class="detail" id="detail">
-    <div class="detail-empty">Click a request to inspect headers and body excerpt.</div>
-  </section>
+    <section class="detail" id="detail">
+      <div class="detail-empty">
+        <div class="detail-empty-mark">→</div>
+        <h3>Select a request</h3>
+        <p>Click any row to inspect its body, headers, redactions and allowlist verdict.<br>
+          <span class="kbd-tip">↑</span><span class="kbd-tip">↓</span> to navigate ·
+          <span class="kbd-tip">Esc</span> to clear ·
+          <span class="kbd-tip">Space</span> to pause</p>
+      </div>
+    </section>
+  </div>
 {% endblock %}

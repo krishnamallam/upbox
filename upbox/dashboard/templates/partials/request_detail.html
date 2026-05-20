@@ -1,42 +1,60 @@
 {% set ic = icon_for(row['tool']) %}
 {% set redacted = row['redactions_applied_json'] is not none %}
 {% set blocked = row['blocked'] %}
+{% set redactions = row['redactions_applied_json'] | from_json or [] %}
 
-<div class="detail-row">
-  <div class="detail-cell">
-    <div class="detail-cell-label">Tool</div>
-    <div class="detail-cell-value">
-      <span class="tool-icon tool-icon-sm tool-icon-{{ ic.code }}">{{ ic.monogram }}</span>
-      {{ row['tool'] or 'Unknown' }}
-    </div>
+<div class="detail-head">
+  <div class="title">
+    <span class="tool-icon tool-icon-{{ ic.code }}"></span>
+    <span class="name">{{ row['tool'] or 'Unknown' }}</span>
+    <span class="ts mono">#{{ '%06d' % row['id'] }} · {{ row['ts'] | ago }}</span>
   </div>
-  <div class="detail-cell">
-    <div class="detail-cell-label">Destination</div>
-    <div class="detail-cell-value mono" title="{{ row['host'] }}{{ row['path'] }}">{{ row['host'] }}{{ row['path'] }}</div>
+  <div class="url">
+    <span class="meth">{{ row['method'] }}</span>
+    <a class="host-btn" href="/?tool={{ (row['tool'] or '') | urlencode }}" title="Filter feed to {{ row['tool'] or 'Unknown' }}">{{ row['host'] }}</a>
+    <span class="path">{{ row['path'] }}</span>
   </div>
-  <div class="detail-cell">
-    <div class="detail-cell-label">SHA-256</div>
-    <div class="detail-cell-value mono">{{ (row['body_hash'][:8] + '…') if row['body_hash'] else '—' }}</div>
-  </div>
-  <div class="detail-cell">
-    <div class="detail-cell-label">Forwarded</div>
-    <div class="detail-cell-value">
+  <div class="summary">
+    <span class="pair"><span class="k">size</span><span class="v">{{ row['req_bytes'] | bytes }}</span></span>
+    <span class="pair"><span class="k">sha</span><span class="v">{{ (row['body_hash'][:8] + '…') if row['body_hash'] else '—' }}</span></span>
+    <span class="pair">
+      <span class="k">status</span>
       {% if blocked %}
-        <span class="badge badge-blocked">blocked</span>
+        <span class="v bad">blocked</span>
       {% elif redacted %}
-        <span class="badge badge-redacted">redacted</span>
+        <span class="v warn">redacted · forwarded</span>
       {% else %}
-        <span class="badge badge-forwarded">yes</span>
+        <span class="v ok">forwarded {{ row['status'] or '' }}</span>
       {% endif %}
-    </div>
+    </span>
   </div>
 </div>
 
-<div class="body-label">Request body (4 KB excerpt)</div>
-<pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
+<div class="tabs">
+  <a href="#body" class="on">Body{% if row['req_bytes'] %}<span class="n">{{ row['req_bytes'] | bytes }}</span>{% endif %}</a>
+  <a href="#headers">Headers<span class="n">{{ headers | length }}</span></a>
+  {% if redactions %}
+    <a href="#redactions">Redactions<span class="n">{{ redactions | length }}</span></a>
+  {% else %}
+    <a href="#redactions">Redactions</a>
+  {% endif %}
+  <a href="#allow">Allowlist</a>
+  <a href="#export">Export</a>
+</div>
 
-<details style="margin-top: 12px;">
-  <summary class="body-label" style="cursor: pointer;">Headers ({{ headers | length }})</summary>
-  <pre class="body" style="margin-top: 6px;">{% for k, v in headers.items() %}{{ k }}: {{ v }}
-{% endfor %}</pre>
-</details>
+<div class="tab-body">
+  <div class="sec-h">Request body (4 KB excerpt)</div>
+  <pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
+
+  <details style="margin-top: 16px;">
+    <summary class="sec-h" style="cursor: pointer;">Headers ({{ headers | length }})</summary>
+    <div class="headers" style="margin-top: 8px;">
+      {% for k, v in headers.items() %}
+        <div class="row">
+          <span class="k">{{ k }}</span>
+          <span class="v {% if '[REDACTED' in v|string %}red{% endif %}">{{ v }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </details>
+</div>

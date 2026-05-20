@@ -8,14 +8,14 @@ reads.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -115,7 +115,9 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     async def index(request: Request) -> HTMLResponse:
         s = store(request)
         tool = request.query_params.get("tool") or None
+        status = request.query_params.get("status") or None
         rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
+        rows = _apply_status_filter(rows, status)
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -124,6 +126,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "rows": rows,
                 "stats": s.dashboard_stats(),
                 "selected_tool": tool,
+                "current_status": status,
                 "bind": "127.0.0.1",
             },
         )
@@ -132,11 +135,13 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     async def recent(request: Request) -> HTMLResponse:
         s = store(request)
         tool = request.query_params.get("tool") or None
+        status = request.query_params.get("status") or None
         rows = s.query_filtered(tool=tool) if tool else s.query_recent(limit=100)
+        rows = _apply_status_filter(rows, status)
         return templates.TemplateResponse(
             request,
             "partials/feed.html",
-            {"rows": rows, "selected_tool": tool},
+            {"rows": rows, "selected_tool": tool, "current_status": status},
         )
 
     @app.get("/sidebar", response_class=HTMLResponse)
@@ -157,7 +162,11 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "partials/stats_bar.html",
-            {"stats": s.dashboard_stats(), "bind": "127.0.0.1"},
+            {
+                "stats": s.dashboard_stats(),
+                "bind": "127.0.0.1",
+                "current_status": request.query_params.get("status") or None,
+            },
         )
 
     @app.get("/requests/{request_id}", response_class=HTMLResponse)
@@ -170,6 +179,30 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
             request,
             "partials/request_detail.html",
             {"row": row, "headers": _parse_headers(row["headers_json"])},
+        )
+
+    @app.get("/export")
+    async def export_jsonl(request: Request) -> StreamingResponse:
+        """Stream the filtered feed as JSONL for download.
+
+        Mirrors the ``/`` filters (tool, status) so the user gets exactly the
+        rows they're looking at. No body bytes — only the audit-row excerpts
+        already in the store.
+        """
+        s = store(request)
+        tool = request.query_params.get("tool") or None
+        status = request.query_params.get("status") or None
+        rows = s.query_filtered(tool=tool) if tool else list(s.iter_all())
+        rows = _apply_status_filter(rows, status)
+
+        def stream() -> Iterator[str]:
+            for row in rows:
+                yield json.dumps(dict(row)) + "\n"
+
+        return StreamingResponse(
+            stream(),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="upbox-audit.jsonl"'},
         )
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -216,6 +249,21 @@ def _parse_headers(headers_json: str | None) -> dict[str, Any]:
         return result if isinstance(result, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _apply_status_filter(rows: list[Any], status: str | None) -> list[Any]:
+    """Filter feed rows by status badge: forwarded / redacted / blocked.
+
+    Unknown values pass through unchanged so callers can pass query-string
+    junk without raising.
+    """
+    if status == "blocked":
+        return [r for r in rows if r["blocked"]]
+    if status == "redacted":
+        return [r for r in rows if not r["blocked"] and r["redactions_applied_json"] is not None]
+    if status == "forwarded":
+        return [r for r in rows if not r["blocked"] and r["redactions_applied_json"] is None]
+    return rows
 
 
 def run(host: str = "127.0.0.1", port: int = 8800) -> None:

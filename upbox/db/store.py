@@ -148,13 +148,14 @@ class Store:
         )
 
     def dashboard_stats(self) -> sqlite3.Row:
-        """Aggregate counts for the dashboard stats bar (total / redacted / blocked)."""
+        """Aggregate counts for the stats bar: total / redacted / blocked / total_bytes."""
         row = self._conn.execute(
             """
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN redactions_applied_json IS NOT NULL THEN 1 ELSE 0 END) AS redacted,
-                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked
+                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked,
+                COALESCE(SUM(req_bytes), 0) AS total_bytes
             FROM requests
             """
         ).fetchone()

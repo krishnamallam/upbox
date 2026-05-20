@@ -30,3 +30,4 @@ Thumbs.db
 
 # upbox runtime data (always in $HOME/.upbox/, but ignore if user redirects here)
 .upbox/
+.gstack/
