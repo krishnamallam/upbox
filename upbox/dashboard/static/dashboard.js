@@ -64,8 +64,14 @@
     }
   }
 
-  window.upboxDetail = async function (id) {
+  let currentDetailId = null;
+  let currentTab = "body";
+
+  window.upboxDetail = async function (id, tab) {
     if (!detail) return;
+    if (tab) currentTab = tab;
+    currentDetailId = id;
+
     document
       .querySelectorAll("table.feed tbody tr.sel")
       .forEach((tr) => tr.classList.remove("sel"));
@@ -73,16 +79,60 @@
     if (row) row.classList.add("sel");
 
     try {
-      const html = await fetchText("/requests/" + encodeURIComponent(id));
+      const url = "/requests/" + encodeURIComponent(id) + "?tab=" + encodeURIComponent(currentTab);
+      const html = await fetchText(url);
       if (html === null) {
         detail.replaceChildren(emptyMessage("Request not found."));
         return;
       }
       replaceFromHtml(detail, html);
+      wireDetailTabs();
+      wireCopyButtons();
     } catch (e) {
       detail.replaceChildren(emptyMessage("Failed to load detail."));
     }
   };
+
+  function wireDetailTabs() {
+    const tabBar = detail && detail.querySelector(".tabs");
+    if (!tabBar || tabBar.dataset.wired === "1") return;
+    tabBar.dataset.wired = "1";
+    tabBar.addEventListener("click", function (ev) {
+      const a = ev.target && ev.target.closest("a[data-tab]");
+      if (!a) return;
+      ev.preventDefault();
+      const tab = a.getAttribute("data-tab");
+      if (currentDetailId != null && tab) {
+        window.upboxDetail(currentDetailId, tab);
+      }
+    });
+  }
+
+  function wireCopyButtons() {
+    if (!detail) return;
+    detail.querySelectorAll("button.copy[data-copy-target]").forEach(function (btn) {
+      if (btn.dataset.wired === "1") return;
+      btn.dataset.wired = "1";
+      btn.addEventListener("click", async function () {
+        const sel = btn.getAttribute("data-copy-target");
+        const node = detail.querySelector(sel);
+        if (!node) return;
+        const text = node.innerText || node.textContent || "";
+        try {
+          await navigator.clipboard.writeText(text);
+          const orig = btn.textContent;
+          btn.textContent = "copied";
+          btn.classList.add("ok");
+          setTimeout(function () {
+            btn.textContent = orig;
+            btn.classList.remove("ok");
+          }, 1200);
+        } catch (e) {
+          // ignore — secure-context only
+        }
+      });
+    });
+  }
 
   function emptyMessage(text) {
     const div = document.createElement("div");

@@ -8,6 +8,7 @@ reads.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -18,6 +19,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from upbox import settings
 from upbox.dashboard.icons import icon_for
@@ -90,6 +92,32 @@ def _from_json(value: str | None) -> Any:
 
 
 templates.env.filters["from_json"] = _from_json
+
+
+_REDACT_TOKEN_RE = re.compile(r"\[REDACTED:[A-Za-z0-9._\- ]{1,60}\]")
+
+
+def _redact_marks(value: str | None) -> Markup:
+    """Highlight ``[REDACTED:<rule>]`` tokens in a body excerpt.
+
+    The body is HTML-escaped first, then each token (matched on the
+    pre-escape source so we're not chasing escape sequences) is wrapped in
+    ``<span class="red">…</span>``. We accept only ``A-Z 0-9 . _ - space``
+    inside the brackets and cap the rule name at 60 chars so the regex can't
+    be tricked into eating template tags or producing huge spans.
+    """
+    if not value:
+        return Markup("")
+    escaped = escape(value)
+    return Markup(
+        _REDACT_TOKEN_RE.sub(
+            lambda m: f'<span class="red">{escape(m.group(0))}</span>',
+            str(escaped),
+        )
+    )
+
+
+templates.env.filters["redact_marks"] = _redact_marks
 
 
 def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
@@ -193,15 +221,25 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
         )
 
     @app.get("/requests/{request_id}", response_class=HTMLResponse)
-    async def detail(request: Request, request_id: int) -> HTMLResponse:
+    async def detail(
+        request: Request,
+        request_id: int,
+    ) -> HTMLResponse:
         s = store(request)
         row = s.query_by_id(request_id)
         if row is None:
             raise HTTPException(status_code=404, detail="request not found")
+        requested_tab = request.query_params.get("tab", "body")
+        if requested_tab not in _VALID_DETAIL_TABS:
+            requested_tab = "body"
         return templates.TemplateResponse(
             request,
             "partials/request_detail.html",
-            {"row": row, "headers": _parse_headers(row["headers_json"])},
+            {
+                "row": row,
+                "headers": _parse_headers(row["headers_json"]),
+                "active_tab": requested_tab,
+            },
         )
 
     @app.get("/export")
@@ -279,6 +317,7 @@ def _parse_headers(headers_json: str | None) -> dict[str, Any]:
 
 _VALID_RANGES = {"5m", "1h", "24h", "All"}
 _VALID_STATUSES = {"all", "forwarded", "redacted", "blocked"}
+_VALID_DETAIL_TABS = {"body", "headers", "redactions", "allow", "export"}
 
 
 def _read_filters(request: Request) -> dict[str, str | None]:

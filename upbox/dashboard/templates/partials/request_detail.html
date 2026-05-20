@@ -2,6 +2,9 @@
 {% set redacted = row['redactions_applied_json'] is not none %}
 {% set blocked = row['blocked'] %}
 {% set redactions = row['redactions_applied_json'] | from_json or [] %}
+{% set tab = active_tab or 'body' %}
+{% set known_tabs = ['body', 'headers', 'redactions', 'allow', 'export'] %}
+{% if tab not in known_tabs %}{% set tab = 'body' %}{% endif %}
 
 <div class="detail-head">
   <div class="title">
@@ -30,31 +33,26 @@
   </div>
 </div>
 
-<div class="tabs">
-  <a href="#body" class="on">Body{% if row['req_bytes'] %}<span class="n">{{ row['req_bytes'] | bytes }}</span>{% endif %}</a>
-  <a href="#headers">Headers<span class="n">{{ headers | length }}</span></a>
-  {% if redactions %}
-    <a href="#redactions">Redactions<span class="n">{{ redactions | length }}</span></a>
-  {% else %}
-    <a href="#redactions">Redactions</a>
-  {% endif %}
-  <a href="#allow">Allowlist</a>
-  <a href="#export">Export</a>
+<div class="tabs" data-request-id="{{ row['id'] }}">
+  <a href="#body" data-tab="body" class="{% if tab == 'body' %}on{% endif %}">Body</a>
+  <a href="#headers" data-tab="headers" class="{% if tab == 'headers' %}on{% endif %}">Headers<span class="n">{{ headers | length }}</span></a>
+  <a href="#redactions" data-tab="redactions" class="{% if tab == 'redactions' %}on{% endif %}">
+    Redactions{% if redactions %}<span class="n">{{ redactions | length }}</span>{% endif %}
+  </a>
+  <a href="#allow" data-tab="allow" class="{% if tab == 'allow' %}on{% endif %}">Allowlist</a>
+  <a href="#export" data-tab="export" class="{% if tab == 'export' %}on{% endif %}">Export</a>
 </div>
 
-<div class="tab-body">
-  <div class="sec-h">Request body (4 KB excerpt)</div>
-  <pre class="body">{{ row['body_excerpt'] or '(empty)' }}</pre>
-
-  <details style="margin-top: 16px;">
-    <summary class="sec-h" style="cursor: pointer;">Headers ({{ headers | length }})</summary>
-    <div class="headers" style="margin-top: 8px;">
-      {% for k, v in headers.items() %}
-        <div class="row">
-          <span class="k">{{ k }}</span>
-          <span class="v {% if '[REDACTED' in v|string %}red{% endif %}">{{ v }}</span>
-        </div>
-      {% endfor %}
-    </div>
-  </details>
+<div class="tab-body" id="tab-body">
+  {% if tab == 'body' %}
+    {% include "partials/tabs/body.html" %}
+  {% elif tab == 'headers' %}
+    {% include "partials/tabs/headers.html" %}
+  {% elif tab == 'redactions' %}
+    {% include "partials/tabs/redactions.html" %}
+  {% elif tab == 'allow' %}
+    {% include "partials/tabs/allowlist.html" %}
+  {% elif tab == 'export' %}
+    {% include "partials/tabs/export.html" %}
+  {% endif %}
 </div>
