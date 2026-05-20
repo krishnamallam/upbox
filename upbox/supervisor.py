@@ -25,6 +25,7 @@ PID_FILE = Path.home() / ".upbox" / "supervisor.pid"
 POLL_INTERVAL = 0.5
 TERMINATE_GRACE = 5.0
 IS_WINDOWS = sys.platform == "win32"
+SPAWN_MODULE = "upbox"
 
 
 def run(proxy_port: int = 8888, dashboard_port: int = 8800) -> int:
@@ -67,7 +68,10 @@ def run(proxy_port: int = 8888, dashboard_port: int = 8800) -> int:
 
 
 def _spawn(args: list[str]) -> subprocess.Popen[bytes]:
-    return subprocess.Popen([sys.executable, "-m", "upbox.cli", *args])
+    # `-m upbox` (via `upbox/__main__.py`) actually invokes the typer app.
+    # `-m upbox.cli` would just import the module and exit rc=0, because
+    # cli.py has no `if __name__ == "__main__"` block.
+    return subprocess.Popen([sys.executable, "-m", SPAWN_MODULE, *args])
 
 
 def _stop_all(procs: dict[str, subprocess.Popen[bytes]]) -> None:
