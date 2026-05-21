@@ -45,13 +45,25 @@ def start(
     proxy_port: int = typer.Option(8888, help="Proxy port to listen on."),
     dashboard_port: int = typer.Option(8800, help="Dashboard port to listen on."),
     capture_spec: str = typer.Option(
-        "!__upbox_disabled__",
+        "",
         "--capture-spec",
         help=(
-            "mitmproxy LocalMode intercept spec. Default captures all processes "
-            "(via a sentinel exclude). Examples: 'claude.exe,cursor.exe' for "
-            "AI tools only; '!firefox,!chrome' to skip browsers. "
-            "See mitmproxy local-redirector docs for syntax."
+            "Override the curated AI-tool process list with a custom "
+            "mitmproxy LocalMode intercept spec. Examples: "
+            "'claude.exe,cursor.exe' for those processes only; "
+            "'!firefox,!chrome' to skip browsers. "
+            "See mitmproxy local-redirector docs for syntax. "
+            "Mutually exclusive with --capture-all."
+        ),
+    ),
+    capture_all: bool = typer.Option(
+        False,
+        "--capture-all",
+        help=(
+            "Capture every process system-wide. WARNING: this redirects "
+            "all TCP traffic — including VPN clients (openvpn, wg-quick, "
+            "tailscaled, nordvpnd, mullvad-daemon, protonvpn). Most VPN "
+            "tunnels will drop. Use only if you know what you're doing."
         ),
     ),
     no_allowlist: bool = typer.Option(
@@ -75,20 +87,42 @@ def start(
 ) -> None:
     """Start the proxy + dashboard with OS-level traffic capture.
 
-    Uses mitmproxy's LocalMode (mitmproxy-rs redirector) to intercept HTTPS
-    traffic at the network layer — Wireshark-style. No system-proxy registry
-    edits required, no per-app launchers, no "stuck offline" failure mode.
+    By default, captures the curated list of AI-tool processes in
+    ``upbox.proxy.DEFAULT_CAPTURE_PROCESSES`` (Claude, Cursor, ChatGPT,
+    common browsers for web AI, etc.). VPN clients and unrelated apps
+    are not redirected, so tunnels stay up.
 
-    Requires admin/root on first run (Windows: WinDivert driver install;
-    Linux: iptables; macOS: Network Extension approval). After that, the OS
+    Uses mitmproxy's LocalMode (mitmproxy-rs redirector) to intercept
+    HTTPS traffic at the network layer — Wireshark-style. Requires
+    admin/root on first run (Windows: WinDivert driver install; Linux:
+    iptables; macOS: Network Extension approval). After that, the OS
     handles capture transparently and mitmproxy reverts cleanly on exit.
+
+    Use ``--capture-spec`` to override the default list, or
+    ``--capture-all`` to capture every process (the pre-v0.1.1 default,
+    which can disconnect VPNs).
     """
+    from upbox import proxy as proxy_module
     from upbox import supervisor
+
+    if capture_spec and capture_all:
+        typer.echo(
+            "error: --capture-spec and --capture-all are mutually exclusive.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if capture_all:
+        spec = proxy_module.CAPTURE_ALL_SENTINEL
+    elif capture_spec:
+        spec = capture_spec
+    else:
+        spec = proxy_module.default_capture_spec()
 
     rc = supervisor.run(
         proxy_port=proxy_port,
         dashboard_port=dashboard_port,
-        capture_spec=capture_spec,
+        capture_spec=spec,
         use_allowlist=not no_allowlist,
         extra_allow_hosts=tuple(allow or ()),
     )

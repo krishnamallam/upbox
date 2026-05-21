@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`upbox start` no longer captures every process by default.** It now
+  redirects only the curated list of AI-tool processes in
+  `upbox.proxy.DEFAULT_CAPTURE_PROCESSES` (Claude, Cursor, ChatGPT,
+  Windsurf, Codex, Ollama, common browsers, etc.). VPN clients
+  (OpenVPN, WireGuard, Tailscale, NordVPN, Mullvad, ProtonVPN) and
+  unrelated apps are no longer affected. The pre-fix behavior is
+  available via `upbox start --capture-all`.
+
+### Fixed
+
+- VPN tunnels dropping when `upbox start` was running. mitmproxy's
+  LocalMode redirector was intercepting every process's TCP traffic,
+  including VPN client handshake / keep-alive packets, which mitmproxy
+  cannot proxy as HTTP/TLS. The curated default fixes this; affected
+  users hit by the catch-all default can also run with
+  `--capture-spec` to choose their own list.
+
 ## v0.1.0 — 2026-05-15
 
 Initial public release. Single-machine AI tool traffic auditor: local

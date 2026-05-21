@@ -145,6 +145,21 @@ Then:
 
 Per-tool setup recipes (Cursor, Claude desktop / Code, GitHub Copilot, ChatGPT, curl, SDK clients): [docs/configuring-tools.md](docs/configuring-tools.md).
 
+### What gets captured
+
+`upbox start` only redirects packets from a curated list of AI-tool processes
+(`Claude`, `Cursor`, `ChatGPT`, `claude`, `codex`, `ollama`, common browsers,
+etc. — see `upbox.proxy.DEFAULT_CAPTURE_PROCESSES`). VPN clients (OpenVPN,
+WireGuard, Tailscale, NordVPN, Mullvad, ProtonVPN) and unrelated apps are
+never touched, so tunnels stay up.
+
+To override:
+
+```sh
+upbox start --capture-spec "claude,cursor"   # capture only these
+upbox start --capture-all                    # capture every process (drops VPNs)
+```
+
 ## Verify the install
 
 These should all succeed:
