@@ -22,6 +22,68 @@ from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
 
+# Curated AI-tool process list for `upbox start`'s default LocalMode spec.
+# Captures only the binaries that produce AI traffic so unrelated processes —
+# especially VPN clients (openvpn, wg-quick, tailscaled, nordvpnd, mullvad,
+# protonvpn) — are not redirected through mitmproxy. Names are matched as
+# exe basenames, so per-OS variants are listed explicitly.
+#
+# To capture everything (the pre-fix behavior) use `upbox start --capture-all`.
+# To override with your own list use `upbox start --capture-spec "..."`.
+DEFAULT_CAPTURE_PROCESSES: tuple[str, ...] = (
+    # Desktop AI clients
+    "Claude",
+    "Claude.exe",
+    "ChatGPT",
+    "ChatGPT.exe",
+    # AI-first editors
+    "Cursor",
+    "Cursor.exe",
+    "Windsurf",
+    "Windsurf.exe",
+    # CLI AI tools
+    "claude",
+    "claude.cmd",
+    "codex",
+    "codex.cmd",
+    "ollama",
+    "ollama.exe",
+    "gh",
+    "gh.exe",
+    # General-purpose editors that host AI extensions (Copilot, Cody, Continue)
+    "code",
+    "code.exe",
+    "Code.exe",
+    "code-insiders",
+    # Browsers — needed for web AI (chatgpt.com, claude.ai, gemini.google.com).
+    # The TLS allowlist from tools.yaml means non-AI sites pass through as a
+    # CONNECT tunnel without decryption, so banking and work apps stay intact.
+    "firefox",
+    "Firefox",
+    "firefox.exe",
+    "chrome",
+    "chrome.exe",
+    "chromium",
+    "Chromium",
+    "chromium.exe",
+    "brave",
+    "brave.exe",
+    "msedge",
+    "msedge.exe",
+    "Safari",
+    "Arc",
+)
+
+# Sentinel handed to mitmproxy when the user passes --capture-all. The name
+# never matches a real process, so the "exclude" rule is a no-op and every
+# other process gets captured.
+CAPTURE_ALL_SENTINEL = "!__upbox_disabled__"
+
+
+def default_capture_spec() -> str:
+    """Return the mitmproxy LocalMode spec for the curated AI-tool process list."""
+    return ",".join(DEFAULT_CAPTURE_PROCESSES)
+
 
 def run(
     host: str = "127.0.0.1",
