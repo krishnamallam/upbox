@@ -99,5 +99,5 @@ Yes. Edit `~/.upbox/rules/tools.yaml` (or `redact.yaml`, or
 ```sh
 upbox init --uninstall   # remove CA from trust stores
 rm -rf ~/.upbox/         # remove cert, db, rules, supervisor PID
-pipx uninstall upbox
+pipx uninstall upbox-sh
 ```

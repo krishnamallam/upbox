@@ -44,6 +44,8 @@ Install a local CA, point your AI tools at the upbox proxy, then watch.
 
 Pick whichever method fits your setup. All of them give you the same `upbox` command on `PATH`. Python 3.12+ is required.
 
+> The PyPI package is named **`upbox-sh`** (the bare `upbox` name was already taken by an unrelated project). The command it installs is still **`upbox`** — so you `pipx install upbox-sh`, then run `upbox`.
+
 ### Method 1 — pipx *(recommended for most users)*
 
 `pipx` installs CLI tools into an isolated venv but keeps them on `PATH`. No conflicts with your system Python or other projects.
@@ -54,7 +56,7 @@ python3 -m pip install --user pipx
 python3 -m pipx ensurepath
 
 # Install upbox
-pipx install upbox
+pipx install upbox-sh
 
 # Verify
 upbox --help
@@ -65,7 +67,7 @@ upbox --help
 If you use [uv](https://docs.astral.sh/uv/) (Astral's Python toolchain), it has a built-in tool installer that's faster than pipx.
 
 ```sh
-uv tool install upbox
+uv tool install upbox-sh
 upbox --help
 ```
 
@@ -74,10 +76,12 @@ upbox --help
 Run upbox without installing anything globally. uv resolves and caches deps the first time, then it's instant.
 
 ```sh
-uvx upbox --help
-uvx upbox init
-uvx upbox start
+uvx --from upbox-sh upbox --help
+uvx --from upbox-sh upbox init
+uvx --from upbox-sh upbox start
 ```
+
+The `--from upbox-sh` is required because the package (`upbox-sh`) and the command (`upbox`) have different names — without it, uvx would try to fetch a package called `upbox`.
 
 Good for one-shot smoke tests; less good as a daily driver because each command re-resolves.
 
@@ -85,7 +89,7 @@ Good for one-shot smoke tests; less good as a daily driver because each command 
 
 ```sh
 python3 -m venv ~/.venvs/upbox
-~/.venvs/upbox/bin/pip install upbox
+~/.venvs/upbox/bin/pip install upbox-sh
 ~/.venvs/upbox/bin/upbox --help
 
 # Optional: symlink to PATH
@@ -203,9 +207,9 @@ upbox init --uninstall                  # remove CA from every trust store it wa
 rm -rf ~/.upbox/                        # remove cert, audit db, rules (optional)
 
 # Then uninstall the package itself with whichever installer you used:
-pipx uninstall upbox                    # if you used pipx
-uv tool uninstall upbox                 # if you used uv tool
-~/.venvs/upbox/bin/pip uninstall upbox  # if you used a venv
+pipx uninstall upbox-sh                 # if you used pipx
+uv tool uninstall upbox-sh              # if you used uv tool
+~/.venvs/upbox/bin/pip uninstall upbox-sh  # if you used a venv
 ```
 
 ## Development

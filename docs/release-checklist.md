@@ -33,7 +33,7 @@ Configure once at <https://pypi.org/manage/account/publishing/>:
 
 | Field | Value |
 |---|---|
-| PyPI Project Name | `upbox` |
+| PyPI Project Name | `upbox-sh` |
 | Owner | `krishnamallam` |
 | Repository name | `upbox` |
 | Workflow name | `release.yml` |
@@ -60,7 +60,7 @@ git push origin v0.1.0
 3. Publishes to PyPI via trusted publishing.
 4. Creates a GitHub Release with auto-generated notes + artefacts.
 
-Verify with `pipx install upbox==0.1.0` in a clean shell.
+Verify with `pipx install upbox-sh==0.1.0` in a clean shell.
 
 ## Launch posts
 

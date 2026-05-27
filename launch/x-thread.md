@@ -31,7 +31,7 @@ upbox sits between your AI tools and the cloud and logs every request:
 One-time setup on Linux / macOS:
 
 ```
-pipx install upbox
+pipx install upbox-sh
 upbox init        # generates + installs local CA
 upbox start       # spins up proxy + dashboard
 ```

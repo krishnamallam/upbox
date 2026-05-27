@@ -42,7 +42,7 @@ The whole point is that the auditor has to be inspectable.
 
 Install on Linux / macOS:
 
-    pipx install upbox
+    pipx install upbox-sh
     upbox init        # one-time CA install
     upbox start       # proxy on :8888, dashboard on :8800
 

@@ -31,7 +31,7 @@ Features:
 Install:
 
 ```
-pipx install upbox
+pipx install upbox-sh
 upbox init
 upbox start
 ```
