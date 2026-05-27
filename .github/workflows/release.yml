@@ -17,7 +17,10 @@ jobs:
       url: https://pypi.org/p/upbox-sh
     permissions:
       id-token: write
-      contents: read
+      # contents: write is required to create the GitHub Release (and to
+      # generate its notes). contents: read fails the release step with
+      # "Resource not accessible by integration".
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +46,11 @@ jobs:
 
       - name: Publish to PyPI (trusted publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Don't hard-fail if a version was already uploaded — lets the
+          # workflow be safely re-run (e.g. after a later step failed)
+          # without choking on PyPI's "file already exists".
+          skip-existing: true
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
