@@ -30,7 +30,7 @@ def populated_db(tmp_path: Path) -> Path:
                 body_excerpt='{"prompt": "hi"}',
                 body_hash="deadbeef",
                 redactions_applied_json=None,
-                blocked=0,
+                enforcement=None,
             )
         )
     return db
@@ -108,7 +108,8 @@ def test_index_filters_by_tool_query_param(populated_db: Path) -> None:
 
 @pytest.fixture
 def mixed_db(tmp_path: Path) -> Path:
-    """One forwarded row, one redacted row, one blocked row — for filter tests."""
+    """Forwarded, redacted, flagged (off-allowlist but sent), and blocked
+    (stopped with 403) rows — one each, for filter tests."""
     db = tmp_path / "mixed.db"
     with Store(db) as s:
         s.insert_request(
@@ -126,7 +127,7 @@ def mixed_db(tmp_path: Path) -> Path:
                 body_excerpt=None,
                 body_hash="aaaa",
                 redactions_applied_json=None,
-                blocked=0,
+                enforcement=None,
             )
         )
         s.insert_request(
@@ -144,7 +145,7 @@ def mixed_db(tmp_path: Path) -> Path:
                 body_excerpt=None,
                 body_hash="bbbb",
                 redactions_applied_json='[{"rule":"anthropic-key","count":1}]',
-                blocked=0,
+                enforcement=None,
             )
         )
         s.insert_request(
@@ -153,7 +154,7 @@ def mixed_db(tmp_path: Path) -> Path:
                 tool="Codeium",
                 method="POST",
                 scheme="https",
-                host="unknown.host",
+                host="blocked.host",
                 path="/track",
                 req_bytes=50,
                 resp_bytes=None,
@@ -162,7 +163,25 @@ def mixed_db(tmp_path: Path) -> Path:
                 body_excerpt=None,
                 body_hash=None,
                 redactions_applied_json=None,
-                blocked=1,
+                enforcement="blocked",
+            )
+        )
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:03",
+                tool="ChatGPT",
+                method="POST",
+                scheme="https",
+                host="flagged.host",
+                path="/v1/chat",
+                req_bytes=75,
+                resp_bytes=120,
+                status=200,
+                headers_json="{}",
+                body_excerpt=None,
+                body_hash="cccc",
+                redactions_applied_json=None,
+                enforcement="flagged",
             )
         )
     return db
@@ -172,9 +191,19 @@ def test_index_status_blocked_shows_only_blocked(mixed_db: Path) -> None:
     with TestClient(create_app(mixed_db)) as c:
         response = c.get("/?status=blocked")
 
-    assert "unknown.host" in response.text
+    assert "blocked.host" in response.text
+    assert "flagged.host" not in response.text
     assert "api.cursor.sh" not in response.text
     assert "api.anthropic.com" not in response.text
+
+
+def test_index_status_flagged_shows_only_flagged(mixed_db: Path) -> None:
+    with TestClient(create_app(mixed_db)) as c:
+        response = c.get("/?status=flagged")
+
+    assert "flagged.host" in response.text
+    assert "blocked.host" not in response.text
+    assert "api.cursor.sh" not in response.text
 
 
 def test_index_status_redacted_shows_only_redacted(mixed_db: Path) -> None:
@@ -291,7 +320,7 @@ def test_detail_body_wraps_redaction_markers(tmp_path: Path) -> None:
                 body_excerpt="AWS=[REDACTED:aws-access-key] OAI=[REDACTED:openai-key]",
                 body_hash="abc",
                 redactions_applied_json='[{"rule":"aws-access-key","count":1}]',
-                blocked=0,
+                enforcement=None,
             )
         )
     with TestClient(create_app(db)) as c:
@@ -320,7 +349,7 @@ def test_detail_body_escapes_html_in_excerpt(tmp_path: Path) -> None:
                 body_excerpt="<script>alert(1)</script>",
                 body_hash="abc",
                 redactions_applied_json=None,
-                blocked=0,
+                enforcement=None,
             )
         )
     with TestClient(create_app(db)) as c:
@@ -342,4 +371,4 @@ def test_export_streams_filtered_jsonl(mixed_db: Path) -> None:
     assert len(lines) == 1
     import json as _json
 
-    assert _json.loads(lines[0])["host"] == "unknown.host"
+    assert _json.loads(lines[0])["host"] == "blocked.host"

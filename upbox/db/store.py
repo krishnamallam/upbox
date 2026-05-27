@@ -29,8 +29,13 @@ class RequestRecord:
     """One row in the requests table.
 
     Fields filled in by later-day addons (``tool`` on Day 4, ``redactions_applied_json``
-    on Day 7, ``blocked`` on Day 8) are ``None`` / 0 by default so Day 3 capture
+    on Day 7, ``enforcement`` on Day 8) are ``None`` by default so Day 3 capture
     can build a record without knowing about them.
+
+    ``enforcement`` is the allowlist outcome: ``None`` (on-allowlist or no
+    policy), ``"flagged"`` (off-allowlist, forwarded anyway), or ``"blocked"``
+    (off-allowlist, short-circuited with a 403). Only ``"blocked"`` means the
+    request never reached the cloud.
     """
 
     ts: str
@@ -46,12 +51,12 @@ class RequestRecord:
     body_excerpt: str | None
     body_hash: str | None
     redactions_applied_json: str | None
-    blocked: int
+    enforcement: str | None
 
 
 _INSERT_COLUMNS = (
     "ts, tool, method, scheme, host, path, req_bytes, resp_bytes, status, "
-    "headers_json, body_excerpt, body_hash, redactions_applied_json, blocked"
+    "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement"
 )
 _INSERT_PLACEHOLDERS = ", ".join("?" * 14)
 
@@ -67,11 +72,26 @@ class Store:
         self._conn = sqlite3.connect(resolved, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        self._migrate_enforcement_column()
         self._enable_wal()
 
     def _init_schema(self) -> None:
         schema = resources.files("upbox.db").joinpath("schema.sql").read_text()
         self._conn.executescript(schema)
+
+    def _migrate_enforcement_column(self) -> None:
+        # Databases created before the warn/block split have a boolean
+        # ``blocked`` column but no ``enforcement``. ``CREATE TABLE IF NOT
+        # EXISTS`` leaves them untouched, so add the column here or inserts
+        # referencing ``enforcement`` would fail. Old ``blocked=1`` rows
+        # conflated warn + block; backfill them to 'flagged' since the shipped
+        # default only ever produced warns (forwarded), not real 403s.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+        if "enforcement" in columns:
+            return
+        self._conn.execute("ALTER TABLE requests ADD COLUMN enforcement TEXT")
+        if "blocked" in columns:
+            self._conn.execute("UPDATE requests SET enforcement = 'flagged' WHERE blocked = 1")
 
     def _enable_wal(self) -> None:
         row = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
@@ -98,7 +118,7 @@ class Store:
                 record.body_excerpt,
                 record.body_hash,
                 record.redactions_applied_json,
-                record.blocked,
+                record.enforcement,
             ),
         )
         rowid = cursor.lastrowid
@@ -133,10 +153,14 @@ class Store:
     ) -> list[sqlite3.Row]:
         """Filtered query. All filters are AND-combined.
 
-        ``status`` is one of ``forwarded``/``redacted``/``blocked`` and shapes
-        the badge on each row. ``search`` matches against host, path, and tool
-        with case-insensitive LIKE — callers escape ``%`` / ``_`` themselves
-        or accept that those become wildcards.
+        ``status`` is one of ``forwarded``/``redacted``/``flagged``/``blocked``
+        and shapes the badge on each row. ``flagged`` and ``blocked`` are
+        distinct: flagged requests were forwarded to the cloud (off-allowlist
+        under a warn policy), blocked ones were stopped with a 403.
+        ``forwarded`` means sent cleanly — on-allowlist and unredacted.
+        ``search`` matches against host, path, and tool with case-insensitive
+        LIKE — callers escape ``%`` / ``_`` themselves or accept that those
+        become wildcards.
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -150,11 +174,13 @@ class Store:
             clauses.append("tool = ?")
             params.append(tool)
         if status == "blocked":
-            clauses.append("blocked = 1")
+            clauses.append("enforcement = 'blocked'")
+        elif status == "flagged":
+            clauses.append("enforcement = 'flagged'")
         elif status == "redacted":
-            clauses.append("blocked = 0 AND redactions_applied_json IS NOT NULL")
+            clauses.append("redactions_applied_json IS NOT NULL")
         elif status == "forwarded":
-            clauses.append("blocked = 0 AND redactions_applied_json IS NULL")
+            clauses.append("enforcement IS NULL AND redactions_applied_json IS NULL")
         if search:
             pattern = f"%{search}%"
             clauses.append(
@@ -174,13 +200,19 @@ class Store:
         )
 
     def dashboard_stats(self) -> sqlite3.Row:
-        """Aggregate counts for the stats bar: total / redacted / blocked / total_bytes."""
+        """Aggregate counts for the stats bar.
+
+        ``flagged`` (off-allowlist, forwarded) and ``blocked`` (off-allowlist,
+        stopped with 403) are counted separately — conflating them would let
+        the tile claim a request was stopped when it actually reached the cloud.
+        """
         row = self._conn.execute(
             """
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN redactions_applied_json IS NOT NULL THEN 1 ELSE 0 END) AS redacted,
-                SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked,
+                SUM(CASE WHEN enforcement = 'flagged' THEN 1 ELSE 0 END) AS flagged,
+                SUM(CASE WHEN enforcement = 'blocked' THEN 1 ELSE 0 END) AS blocked,
                 COALESCE(SUM(req_bytes), 0) AS total_bytes
             FROM requests
             """
@@ -196,7 +228,7 @@ class Store:
                     COALESCE(tool, 'Unknown') AS tool,
                     COUNT(*)                  AS request_count,
                     COALESCE(SUM(req_bytes), 0) AS total_req_bytes,
-                    SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END) AS blocked_count
+                    SUM(CASE WHEN enforcement = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
                 FROM requests
                 GROUP BY tool
                 ORDER BY request_count DESC

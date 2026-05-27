@@ -32,11 +32,12 @@ In 2026, the gap matters more than it did even six months ago:
 
 Install a local CA, point your AI tools at the upbox proxy, then watch.
 
-- **Live feed.** Every request in real time, grouped by tool (Cursor, Claude desktop, Copilot, ChatGPT, Codeium, …).
-- **Inspect bodies.** The actual prompt, the actual file content, the actual headers.
+- **Live feed.** Every request in real time, grouped by tool (Cursor, Claude desktop, Claude Code, Copilot, ChatGPT, Codeium, Windsurf, Gemini, Perplexity, Continue, Cody, Tabnine, …). Filter by time window, status, tool, or substring search; pin the rows you care about.
+- **Inspect bodies.** Tabbed detail panel — request body, headers, fired redaction rules, allowlist verdict, and one-click export recipes (replay `curl`, JSONL dump, `upbox export`).
 - **Redact before forwarding.** Regex rules strip `.env` blocks, API keys, and PII patterns *before* the request reaches the cloud.
-- **Domain enforcement.** Allowlist destinations per tool. Block or warn on unknown hosts. See the receipts.
+- **Domain enforcement.** Allowlist destinations per tool. Off-allowlist requests are either **flagged** (forwarded to the cloud, but marked) or **blocked** (stopped with a 403) — set per tool in `allowlist.yaml`. Flagged is not blocked: the dashboard always tells you which requests actually left.
 - **Audit log.** JSON Lines + CSV export. Tamper-evident hash chain. Article-26-friendly fields.
+- **Keyboard-first dashboard.** Arrow keys move through the feed, `/` jumps to search, `Esc` cascades back out, light/dark theme toggle. No mouse required.
 - **Local-only.** SQLite on disk. The dashboard binds to `127.0.0.1` only. No outbound calls from upbox itself.
 
 ## Install
@@ -220,7 +221,7 @@ uv sync --dev
 Then:
 
 ```sh
-# Run the full test suite (~2s, 85 tests)
+# Run the full test suite (~4s, 137 tests)
 uv run pytest -v
 
 # Run a single test file
@@ -346,7 +347,7 @@ upbox stands on:
 - **[FastAPI](https://fastapi.tiangolo.com)** (MIT) — the dashboard backend.
 - **[HTMX](https://htmx.org)** (BSD-2-Clause) — the dashboard frontend without a build step.
 - **[SQLite](https://sqlite.org)** (public domain) — the audit log store.
-- **[Pico.css](https://picocss.com)** (MIT) — minimal CSS for the dashboard.
+- **[Geist](https://vercel.com/font)** and **[JetBrains Mono](https://www.jetbrains.com/lp/mono/)** — the dashboard's sans + mono typefaces.
 - **[Typer](https://typer.tiangolo.com)** (MIT) — the CLI.
 
 Full third-party license texts are preserved in [`LICENSES/`](LICENSES/).

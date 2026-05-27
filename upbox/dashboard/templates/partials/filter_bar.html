@@ -24,7 +24,7 @@
     {% endfor %}
   </div>
   <div class="seg" role="group" aria-label="Status">
-    {% for s, lbl in [('all','All'), ('forwarded','Forwarded'), ('redacted','Redacted'), ('blocked','Blocked')] %}
+    {% for s, lbl in [('all','All'), ('forwarded','Forwarded'), ('redacted','Redacted'), ('flagged','Flagged'), ('blocked','Blocked')] %}
       <a href="{{ link(set_status=s) }}" class="{% if status == s %}on{% endif %}">{{ lbl }}</a>
     {% endfor %}
   </div>

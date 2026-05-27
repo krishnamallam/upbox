@@ -25,7 +25,11 @@
   <div class="lbl">Redacted</div>
   <div class="val warn">{{ stats['redacted'] or 0 }}</div>
 </a>
-<a href="{{ stat_link('blocked') }}" class="stat-cell {% if status == 'blocked' %}on{% endif %}" title="Filter → blocked">
+<a href="{{ stat_link('flagged') }}" class="stat-cell {% if status == 'flagged' %}on{% endif %}" title="Off-allowlist but forwarded to the cloud">
+  <div class="lbl">Flagged</div>
+  <div class="val warn">{{ stats['flagged'] or 0 }}</div>
+</a>
+<a href="{{ stat_link('blocked') }}" class="stat-cell {% if status == 'blocked' %}on{% endif %}" title="Stopped with 403 — never sent">
   <div class="lbl">Blocked</div>
   <div class="val bad">{{ stats['blocked'] or 0 }}</div>
 </a>

@@ -21,7 +21,7 @@ def _flow(host: str = "api.example.com", tool: str | None = None):
     return flow
 
 
-def test_allowed_host_for_tool_is_not_blocked() -> None:
+def test_allowed_host_for_tool_is_not_flagged() -> None:
     addon = EnforceAddon(
         policies={"Cursor": ToolPolicy(allow=("api.cursor.sh",), block_unknown="warn")}
     )
@@ -29,10 +29,10 @@ def test_allowed_host_for_tool_is_not_blocked() -> None:
 
     addon.request(flow)
 
-    assert "upbox_blocked" not in flow.metadata
+    assert "upbox_enforcement" not in flow.metadata
 
 
-def test_unknown_host_warns_but_does_not_short_circuit() -> None:
+def test_unknown_host_under_warn_is_flagged_but_forwarded() -> None:
     addon = EnforceAddon(
         policies={"Cursor": ToolPolicy(allow=("api.cursor.sh",), block_unknown="warn")}
     )
@@ -40,11 +40,11 @@ def test_unknown_host_warns_but_does_not_short_circuit() -> None:
 
     addon.request(flow)
 
-    assert flow.metadata["upbox_blocked"] == "warn"
+    assert flow.metadata["upbox_enforcement"] == "flagged"
     assert flow.response is None
 
 
-def test_unknown_host_blocks_short_circuits_with_403() -> None:
+def test_unknown_host_under_block_short_circuits_with_403() -> None:
     addon = EnforceAddon(
         policies={"Cursor": ToolPolicy(allow=("api.cursor.sh",), block_unknown="block")}
     )
@@ -52,6 +52,7 @@ def test_unknown_host_blocks_short_circuits_with_403() -> None:
 
     addon.request(flow)
 
+    assert flow.metadata["upbox_enforcement"] == "blocked"
     assert flow.response is not None
     assert flow.response.status_code == 403
 
@@ -66,7 +67,7 @@ def test_default_policy_applies_when_tool_not_listed() -> None:
 
     addon.request(flow)
 
-    assert flow.metadata["upbox_blocked"] == "warn"
+    assert flow.metadata["upbox_enforcement"] == "flagged"
 
 
 def test_subdomain_match_is_allowed() -> None:
@@ -86,7 +87,7 @@ def test_no_policy_for_tool_and_no_default_skips_check() -> None:
 
     addon.request(flow)
 
-    assert "upbox_blocked" not in flow.metadata
+    assert "upbox_enforcement" not in flow.metadata
 
 
 def test_bundled_allowlist_yaml_parses() -> None:

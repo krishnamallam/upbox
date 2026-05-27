@@ -316,7 +316,7 @@ def _parse_headers(headers_json: str | None) -> dict[str, Any]:
 
 
 _VALID_RANGES = {"5m", "1h", "24h", "All"}
-_VALID_STATUSES = {"all", "forwarded", "redacted", "blocked"}
+_VALID_STATUSES = {"all", "forwarded", "redacted", "flagged", "blocked"}
 _VALID_DETAIL_TABS = {"body", "headers", "redactions", "allow", "export"}
 
 

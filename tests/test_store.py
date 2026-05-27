@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -42,7 +43,7 @@ def _make_record(**overrides: object) -> RequestRecord:
         "body_excerpt": '{"prompt": "hi"}',
         "body_hash": "deadbeef",
         "redactions_applied_json": None,
-        "blocked": 0,
+        "enforcement": None,
     }
     base.update(overrides)
     return RequestRecord(**base)  # type: ignore[arg-type]
@@ -130,40 +131,47 @@ def test_export_csv_writes_header_when_empty(tmp_store: Store) -> None:
     assert "ts" in buf.getvalue().splitlines()[0]
 
 
-def test_query_filtered_status_blocked(tmp_store: Store) -> None:
-    tmp_store.insert_request(_make_record(blocked=1))
-    tmp_store.insert_request(_make_record(blocked=0))
+def test_query_filtered_status_blocked_excludes_flagged(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(enforcement="blocked"))
+    tmp_store.insert_request(_make_record(enforcement="flagged"))
 
     rows = tmp_store.query_filtered(status="blocked")
 
     assert len(rows) == 1
-    assert rows[0]["blocked"] == 1
+    assert rows[0]["enforcement"] == "blocked"
+
+
+def test_query_filtered_status_flagged_excludes_blocked(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(enforcement="flagged"))
+    tmp_store.insert_request(_make_record(enforcement="blocked"))
+
+    rows = tmp_store.query_filtered(status="flagged")
+
+    assert len(rows) == 1
+    assert rows[0]["enforcement"] == "flagged"
 
 
 def test_query_filtered_status_redacted(tmp_store: Store) -> None:
     redaction_a = json.dumps([{"rule": "a"}])
-    redaction_b = json.dumps([{"rule": "b"}])
-    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=None))
-    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=redaction_a))
-    tmp_store.insert_request(_make_record(blocked=1, redactions_applied_json=redaction_b))
+    tmp_store.insert_request(_make_record(enforcement=None, redactions_applied_json=None))
+    tmp_store.insert_request(_make_record(enforcement=None, redactions_applied_json=redaction_a))
 
     rows = tmp_store.query_filtered(status="redacted")
 
     assert len(rows) == 1
     assert rows[0]["redactions_applied_json"] is not None
-    assert rows[0]["blocked"] == 0
 
 
-def test_query_filtered_status_forwarded(tmp_store: Store) -> None:
+def test_query_filtered_status_forwarded_excludes_flagged(tmp_store: Store) -> None:
     redaction = json.dumps([{"rule": "a"}])
-    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=None))
-    tmp_store.insert_request(_make_record(blocked=0, redactions_applied_json=redaction))
-    tmp_store.insert_request(_make_record(blocked=1))
+    tmp_store.insert_request(_make_record(enforcement=None, redactions_applied_json=None))
+    tmp_store.insert_request(_make_record(enforcement=None, redactions_applied_json=redaction))
+    tmp_store.insert_request(_make_record(enforcement="flagged"))
 
     rows = tmp_store.query_filtered(status="forwarded")
 
     assert len(rows) == 1
-    assert rows[0]["blocked"] == 0
+    assert rows[0]["enforcement"] is None
     assert rows[0]["redactions_applied_json"] is None
 
 
@@ -210,3 +218,38 @@ def test_dashboard_stats_reports_total_bytes(tmp_store: Store) -> None:
     stats = tmp_store.dashboard_stats()
 
     assert stats["total_bytes"] == 350
+
+
+def test_dashboard_stats_counts_flagged_separately_from_blocked(tmp_store: Store) -> None:
+    tmp_store.insert_request(_make_record(enforcement="flagged"))
+    tmp_store.insert_request(_make_record(enforcement="flagged"))
+    tmp_store.insert_request(_make_record(enforcement="blocked"))
+
+    stats = tmp_store.dashboard_stats()
+
+    assert stats["flagged"] == 2
+    assert stats["blocked"] == 1
+
+
+def test_migrated_db_backfills_old_blocked_rows_as_flagged(tmp_path: Path) -> None:
+    db = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(db)
+    legacy.execute(
+        "CREATE TABLE requests ("
+        "id INTEGER PRIMARY KEY, ts TEXT NOT NULL, tool TEXT, method TEXT, "
+        "scheme TEXT, host TEXT, path TEXT, req_bytes INTEGER, resp_bytes INTEGER, "
+        "status INTEGER, headers_json TEXT, body_excerpt TEXT, body_hash TEXT, "
+        "redactions_applied_json TEXT, blocked INTEGER NOT NULL DEFAULT 0)"
+    )
+    legacy.execute("INSERT INTO requests (ts, blocked) VALUES ('2026-05-20T00:00:00', 1)")
+    legacy.commit()
+    legacy.close()
+
+    store = Store(db)
+    try:
+        rows = store.query_filtered(status="flagged")
+    finally:
+        store.close()
+
+    assert len(rows) == 1
+    assert rows[0]["enforcement"] == "flagged"

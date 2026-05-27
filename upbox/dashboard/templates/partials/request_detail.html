@@ -1,6 +1,6 @@
 {% set ic = icon_for(row['tool']) %}
 {% set redacted = row['redactions_applied_json'] is not none %}
-{% set blocked = row['blocked'] %}
+{% set enforcement = row['enforcement'] %}
 {% set redactions = row['redactions_applied_json'] | from_json or [] %}
 {% set tab = active_tab or 'body' %}
 {% set known_tabs = ['body', 'headers', 'redactions', 'allow', 'export'] %}
@@ -22,8 +22,10 @@
     <span class="pair"><span class="k">sha</span><span class="v">{{ (row['body_hash'][:8] + '…') if row['body_hash'] else '—' }}</span></span>
     <span class="pair">
       <span class="k">status</span>
-      {% if blocked %}
-        <span class="v bad">blocked</span>
+      {% if enforcement == 'blocked' %}
+        <span class="v bad">blocked · 403, not sent</span>
+      {% elif enforcement == 'flagged' %}
+        <span class="v warn">flagged · off-allowlist, forwarded</span>
       {% elif redacted %}
         <span class="v warn">redacted · forwarded</span>
       {% else %}

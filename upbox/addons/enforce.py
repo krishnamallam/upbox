@@ -1,13 +1,15 @@
 """Domain-allowlist enforcement addon.
 
-Per-tool policy: which destinations a tool is allowed to call. Anything
-outside the allowlist is either flagged (``block_unknown: warn`` — capture
-records ``blocked=1`` but the request still goes through) or short-
-circuited (``block_unknown: block`` — synthesised 403 response, never
-reaches upstream).
+Per-tool policy: which destinations a tool is allowed to call. A request to a
+host outside the allowlist is tagged in ``flow.metadata['upbox_enforcement']``:
 
-Either way, the capture addon writes a row, so the audit trail records
-every block decision.
+- ``"flagged"`` (``block_unknown: warn``) — the request still goes through to
+  the cloud; we only record that it was off-allowlist.
+- ``"blocked"`` (``block_unknown: block``) — synthesised 403 response, the
+  request never reaches upstream.
+
+Only ``"blocked"`` actually stops egress. The capture addon writes a row
+either way, so the audit trail records every decision.
 """
 
 from __future__ import annotations
@@ -66,7 +68,7 @@ def _host_allowed(host: str, allow: tuple[str, ...]) -> bool:
 
 
 class EnforceAddon:
-    """Tags ``flow.metadata['upbox_blocked']`` and short-circuits if needed."""
+    """Tags ``flow.metadata['upbox_enforcement']`` and short-circuits if needed."""
 
     def __init__(self, policies: dict[str, ToolPolicy] | None = None) -> None:
         self._policies = policies if policies is not None else load_policies()
@@ -90,11 +92,11 @@ class EnforceAddon:
             return
 
         if policy.block_unknown == "block":
-            flow.metadata["upbox_blocked"] = "block"
+            flow.metadata["upbox_enforcement"] = "blocked"
             flow.response = http.Response.make(
                 403,
                 b"upbox: destination not in allowlist for this tool",
                 {"content-type": "text/plain"},
             )
         else:
-            flow.metadata["upbox_blocked"] = "warn"
+            flow.metadata["upbox_enforcement"] = "flagged"

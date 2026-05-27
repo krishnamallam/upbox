@@ -4,9 +4,11 @@
 #
 # `allow` is an exact-or-subdomain list of hostnames. Any host outside the
 # list is treated according to `block_unknown`:
-#   warn  — capture the request, mark blocked=1 for the dashboard, but
-#           forward it anyway so the user's tool doesn't break.
-#   block — short-circuit with HTTP 403; never reach the upstream host.
+#   warn  — tag the request "flagged" in the dashboard, but forward it to the
+#           cloud anyway so the user's tool doesn't break. This is the default.
+#           "Flagged" means the request was SENT — it is not blocked.
+#   block — short-circuit with HTTP 403; never reach the upstream host. Only
+#           this shows as "blocked" in the dashboard.
 
 Cursor:
   allow: [api.cursor.sh, api2.cursor.sh]
