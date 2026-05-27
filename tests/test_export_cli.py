@@ -40,7 +40,7 @@ def _record(**overrides) -> RequestRecord:
         "body_excerpt": None,
         "body_hash": None,
         "redactions_applied_json": None,
-        "blocked": 0,
+        "enforcement": None,
     }
     base.update(overrides)
     return RequestRecord(**base)

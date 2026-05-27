@@ -19,7 +19,11 @@ CREATE TABLE IF NOT EXISTS requests (
     body_excerpt             TEXT,
     body_hash                TEXT,
     redactions_applied_json  TEXT,
-    blocked                  INTEGER NOT NULL DEFAULT 0
+    -- Enforcement outcome: NULL = on-allowlist (or no policy), 'flagged' =
+    -- off-allowlist but still FORWARDED (block_unknown: warn), 'blocked' =
+    -- off-allowlist and short-circuited with a 403 (block_unknown: block).
+    -- 'flagged' requests reached the cloud; only 'blocked' ones did not.
+    enforcement              TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_requests_ts   ON requests(ts);

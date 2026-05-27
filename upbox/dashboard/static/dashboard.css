@@ -671,6 +671,7 @@ table.feed td { padding: 0 22px; vertical-align: middle; }
 }
 .b-fwd, .badge-forwarded { background: var(--accent-2-soft); color: var(--accent-2); }
 .b-red, .badge-redacted  { background: var(--redact-soft); color: var(--redact); }
+.b-flag, .badge-flagged  { background: var(--warn-soft); color: var(--warn); }
 .b-blk, .badge-blocked   { background: var(--danger-soft); color: var(--danger); }
 
 /* Hover hint on feed rows */

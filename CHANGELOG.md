@@ -11,6 +11,14 @@
   (OpenVPN, WireGuard, Tailscale, NordVPN, Mullvad, ProtonVPN) and
   unrelated apps are no longer affected. The pre-fix behavior is
   available via `upbox start --capture-all`.
+- **Dashboard now distinguishes "Flagged" from "Blocked."** A request to
+  an off-allowlist host under the default `warn` policy is **forwarded to
+  the cloud** — it is now labelled **Flagged**, with its own stat tile and
+  filter. **Blocked** is reserved for requests actually stopped with a 403
+  (`block_unknown: block`). The audit log's `blocked` boolean is replaced
+  by an `enforcement` field (`null` / `flagged` / `blocked`); existing
+  databases migrate automatically, with old `blocked=1` rows backfilled to
+  `flagged`.
 
 ### Fixed
 
@@ -20,6 +28,11 @@
   cannot proxy as HTTP/TLS. The curated default fixes this; affected
   users hit by the catch-all default can also run with
   `--capture-spec` to choose their own list.
+- Dashboard labelled forwarded requests as "Blocked." The capture addon
+  recorded `blocked=1` for both `warn` (forwarded) and `block` (stopped)
+  decisions, so with the default all-`warn` config every off-allowlist
+  request that reached the cloud showed up under "Blocked" — the opposite
+  of the truth for an egress-audit tool.
 
 ## v0.1.0 — 2026-05-15
 

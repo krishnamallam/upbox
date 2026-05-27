@@ -59,5 +59,5 @@ class CaptureAddon:
                 if "upbox_redactions" in flow.metadata
                 else None
             ),
-            blocked=1 if flow.metadata.get("upbox_blocked") else 0,
+            enforcement=flow.metadata.get("upbox_enforcement"),
         )

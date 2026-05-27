@@ -12,7 +12,7 @@
     {% for row in rows %}
       {% set ic = icon_for(row['tool']) %}
       {% set redacted = row['redactions_applied_json'] is not none %}
-      {% set blocked = row['blocked'] %}
+      {% set enforcement = row['enforcement'] %}
       <tr data-id="{{ row['id'] }}"
           onclick="upboxDetail({{ row['id'] }})"
           title="Click to inspect (↑↓ to navigate)">
@@ -26,8 +26,10 @@
         </td>
         <td class="cell-size">{{ row['req_bytes'] | bytes }}</td>
         <td class="cell-status">
-          {% if blocked %}
-            <span class="badge b-blk">blocked</span>
+          {% if enforcement == 'blocked' %}
+            <span class="badge b-blk" title="Stopped with 403 — never sent">blocked</span>
+          {% elif enforcement == 'flagged' %}
+            <span class="badge b-flag" title="Off-allowlist — forwarded to the cloud anyway">flagged</span>
           {% elif redacted %}
             <span class="badge b-red">redacted</span>
           {% else %}
