@@ -91,9 +91,7 @@ class Store:
             return
         self._conn.execute("ALTER TABLE requests ADD COLUMN enforcement TEXT")
         if "blocked" in columns:
-            self._conn.execute(
-                "UPDATE requests SET enforcement = 'flagged' WHERE blocked = 1"
-            )
+            self._conn.execute("UPDATE requests SET enforcement = 'flagged' WHERE blocked = 1")
 
     def _enable_wal(self) -> None:
         row = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
