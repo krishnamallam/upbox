@@ -1,40 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Changed
-
-- **`upbox start` no longer captures every process by default.** It now
-  redirects only the curated list of AI-tool processes in
-  `upbox.proxy.DEFAULT_CAPTURE_PROCESSES` (Claude, Cursor, ChatGPT,
-  Windsurf, Codex, Ollama, common browsers, etc.). VPN clients
-  (OpenVPN, WireGuard, Tailscale, NordVPN, Mullvad, ProtonVPN) and
-  unrelated apps are no longer affected. The pre-fix behavior is
-  available via `upbox start --capture-all`.
-- **Dashboard now distinguishes "Flagged" from "Blocked."** A request to
-  an off-allowlist host under the default `warn` policy is **forwarded to
-  the cloud** — it is now labelled **Flagged**, with its own stat tile and
-  filter. **Blocked** is reserved for requests actually stopped with a 403
-  (`block_unknown: block`). The audit log's `blocked` boolean is replaced
-  by an `enforcement` field (`null` / `flagged` / `blocked`); existing
-  databases migrate automatically, with old `blocked=1` rows backfilled to
-  `flagged`.
-
-### Fixed
-
-- VPN tunnels dropping when `upbox start` was running. mitmproxy's
-  LocalMode redirector was intercepting every process's TCP traffic,
-  including VPN client handshake / keep-alive packets, which mitmproxy
-  cannot proxy as HTTP/TLS. The curated default fixes this; affected
-  users hit by the catch-all default can also run with
-  `--capture-spec` to choose their own list.
-- Dashboard labelled forwarded requests as "Blocked." The capture addon
-  recorded `blocked=1` for both `warn` (forwarded) and `block` (stopped)
-  decisions, so with the default all-`warn` config every off-allowlist
-  request that reached the cloud showed up under "Blocked" — the opposite
-  of the truth for an egress-audit tool.
-
-## v0.1.0 — 2026-05-15
+## v0.1.0 — 2026-05-27
 
 Initial public release. Single-machine AI tool traffic auditor: local
 proxy, dashboard, redaction, per-tool allowlist, audit-log export.
@@ -50,22 +16,37 @@ Supports macOS, Linux, and Windows.
   `upbox status` reports trust per layer.
 - **Capture** — mitmproxy-based proxy persists every flow to SQLite
   (WAL mode). Body excerpt capped at 4 KB; `body_hash` records SHA-256
-  of the full body.
-- **Fingerprinting** — 9 bundled rules covering Cursor, Claude
-  desktop, Claude Code, GitHub Copilot, ChatGPT, Codeium, plus generic
-  OpenAI / Anthropic / Gemini API fallbacks.
+  of the full body. `upbox start` redirects only a curated list of
+  AI-tool processes (`upbox.proxy.DEFAULT_CAPTURE_PROCESSES`: Claude,
+  Cursor, ChatGPT, Windsurf, Codex, Ollama, common browsers, …), so VPN
+  clients (OpenVPN, WireGuard, Tailscale, NordVPN, Mullvad, ProtonVPN)
+  and unrelated apps keep their tunnels up; `--capture-all` opts back
+  into the catch-all. A TLS allowlist derived from `tools.yaml` decrypts
+  only AI hosts — pinned-cert apps (banking, Teams, Outlook) pass
+  through untouched.
+- **Fingerprinting** — 15 bundled rules covering Cursor, Claude
+  Desktop, Claude Code, GitHub Copilot, ChatGPT, Windsurf, Codeium,
+  Continue, Cody, Perplexity, Tabnine, and Replit AI, plus generic
+  OpenAI / Anthropic / Gemini API fallbacks. The union of their `hosts`
+  forms the TLS allowlist.
 - **Redaction** — content-aware. JSON bodies are parsed, walked, and
   re-serialised so structure is preserved. Text bodies get byte regex.
   Binary bodies are skipped with a logged reason. gzip / brotli
   encodings are handled transparently via mitmproxy. Defaults catch
   AWS, OpenAI, Anthropic, GitHub keys and dotenv lines.
-- **Enforce** — per-tool destination allowlist. `warn` flags the
-  request and still forwards; `block` short-circuits with HTTP 403.
-  Either way the audit log records the decision.
+- **Enforce** — per-tool destination allowlist. A host off a tool's
+  allowlist is recorded in the audit log's `enforcement` field: the
+  `warn` policy tags it **flagged** and still forwards it to the cloud;
+  the `block` policy tags it **blocked** and short-circuits with HTTP
+  403 so it never leaves the machine. The dashboard shows the two
+  distinctly — flagged is forwarded, not blocked.
 - **Dashboard** — FastAPI on `127.0.0.1:8800` only (refuses to bind
-  elsewhere). Per-tool tiles, live feed, click-through detail
-  (collapsible headers + body excerpt). Vanilla CSS + JS; no build
-  step.
+  elsewhere). Live feed grouped by tool, a filter bar (time range /
+  status / tool / full-text search), and a tabbed detail panel (Body /
+  Headers / Redactions / Allowlist / Export) with one-click export
+  recipes. Keyboard-first (arrow keys to move, `/` to search, `Esc` to
+  clear) with a light/dark theme toggle. Server-rendered HTMX partials,
+  custom token CSS (Geist + JetBrains Mono); no build step.
 - **Settings page** — edit `tools.yaml`, `redact.yaml`,
   `allowlist.yaml` from the dashboard with `yaml.safe_load`
   validation. Writes to `~/.upbox/rules/`.
@@ -82,12 +63,15 @@ Supports macOS, Linux, and Windows.
 
 ### Tests
 
-80+ unit tests covering: CA generation + per-platform install /
-uninstall (subprocess monkeypatched), WAL pragma assertion, body
-excerpt 4 KB cap, addon exception isolation (capture, fingerprint,
-redact), all four critical redaction tests from the eng-review (JSON,
-gzip, binary skip, malformed JSON), per-tool allowlist policy,
-dashboard route smoke, supervisor child-death handling.
+137 tests covering: CA generation + per-platform install / uninstall
+(subprocess monkeypatched), WAL pragma assertion, body excerpt 4 KB cap,
+addon exception isolation (capture, fingerprint, redact), all four
+critical redaction tests from the eng-review (JSON, gzip, binary skip,
+malformed JSON), the curated capture default (regression guard that it
+never lists a VPN client), per-tool allowlist policy with the
+flagged/blocked split, the `blocked`→`enforcement` schema migration,
+dashboard routes + filter/tab rendering, and supervisor child-death
+handling.
 
 ## v0.1.1 — distribution polish (planned ~2 weeks post-v0.1)
 
