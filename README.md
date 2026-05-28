@@ -289,10 +289,6 @@ Full third-party license texts are preserved in [`LICENSES/`](LICENSES/).
 
 upbox is licensed under the **[MIT License](LICENSE)**.
 
-Earlier drafts of this project considered AGPL-3.0 ("the watcher must be watchable"). MIT was chosen because the audience most likely to deploy upbox at scale (security teams at companies with strict open-source policies) cannot easily adopt AGPL. The cost of that friction outweighed the philosophical win.
-
-The auditor staying open and inspectable is preserved by the open-source commitment itself, not by a license clause. Anyone forking upbox into a closed-source product is welcome to. Their forks are not what you should trust to audit your traffic.
-
 ## Contributing
 
 upbox is pre-1.0 and moving fast. Issues, ideas, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, PR conventions, and the release process.
