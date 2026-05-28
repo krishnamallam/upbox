@@ -195,18 +195,28 @@ CI runs the same on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The f
 ## Architecture
 
 ```
-                 ┌──────────────────┐
-   AI tool  ───▶ │  mitmproxy core  │ ───▶  cloud LLM
-                 │  + upbox addons  │
-                 └────────┬─────────┘
-                          ▼
-                  ┌───────────────┐       ┌──────────────────┐
-                  │  SQLite       │ ◀──── │  Dashboard       │
-                  │  audit log    │       │  (FastAPI + HTMX)│
-                  └───────────────┘       └──────────────────┘
+                  ┌───────────────────────────────────┐
+                  │   upbox start  (supervisor)       │
+                  │   spawns + signals both children  │
+                  └────────┬────────────────┬─────────┘
+                           ▼                ▼
+                ┌──────────────────┐    ┌──────────────────┐
+    AI tool ──▶ │  upbox proxy     │    │  upbox dashboard │ ◀── browser
+                │  mitmproxy +     │    │  FastAPI + HTMX  │     127.0.0.1
+                │  upbox addons    │    │  :8800           │
+                │  :8888           │    └─────────┬────────┘
+                └──┬───────────┬───┘              │
+                   │           │                  │
+            writes │           └─▶  cloud LLM     │ reads
+                   ▼                              ▼
+                ┌─────────────────────────────────────────┐
+                │   SQLite WAL  ~/.upbox/upbox.db         │
+                └─────────────────────────────────────────┘
 ```
 
-Single Python process. mitmproxy as the proxy core (MIT-licensed, battle-tested). SQLite as the audit store. FastAPI + HTMX for the dashboard: fast, no build step, no JS framework.
+`upbox start` is a supervisor: it spawns `upbox proxy` and `upbox dashboard` as separate child processes and forwards `SIGINT` / `SIGTERM` to both. If either child dies, the supervisor kills the other and exits with the dead child's status (see [`upbox/supervisor.py`](upbox/supervisor.py)).
+
+The proxy and dashboard never talk to each other directly. They share state through SQLite running in WAL mode: the proxy writes audit rows; the dashboard reads them. SQLite WAL is the IPC. mitmproxy is the proxy core (MIT-licensed, battle-tested). FastAPI + HTMX for the dashboard: fast, no build step, no JS framework.
 
 ## Threat model
 
@@ -260,34 +270,7 @@ upbox is not legal advice. Consult counsel for compliance certification.
 
 ## Roadmap
 
-**v0.1** (target: 15 July 2026)
-
-- Local CA setup, mitmproxy bootstrap
-- Tool fingerprinting (Cursor, Claude desktop, Copilot, ChatGPT, Codeium)
-- Live dashboard
-- Regex redaction engine
-- SQLite audit log
-- JSONL + CSV export
-
-**v0.1.1: distribution polish** (target: 1–2 weeks post-v0.1)
-
-- **Native binaries:** single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
-- Firefox NSS auto-install on Windows.
-- Live-reload of YAML rule files (currently requires `upbox start` restart).
-
-**v0.2** (target: 1 August 2026, eve of AI Act enforcement)
-
-- Article 26 audit-log export format
-- Tamper-evident hash chain
-- Encrypted-at-rest SQLite
-- Team mode (central dashboard, multiple endpoints, LAN-local)
-
-**v0.3 and beyond**
-
-- Plugin SDK for custom tool fingerprints
-- Companion browser extension (for web LLM apps)
-- macOS menu-bar app, Windows tray app
-- Configurable retention policies, alerting
+See [ROADMAP.md](ROADMAP.md) for v0.1 → v0.3+ milestones.
 
 ## Acknowledgements
 
@@ -312,6 +295,6 @@ The auditor staying open and inspectable is preserved by the open-source commitm
 
 ## Contributing
 
-upbox is pre-1.0 and moving fast. Issues, ideas, and PRs welcome.
+upbox is pre-1.0 and moving fast. Issues, ideas, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, PR conventions, and the release process.
 
 The fastest way to help right now: install v0.1 when it ships, run it against your daily AI tools, and report what surprised you.
