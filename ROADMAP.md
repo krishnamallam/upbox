@@ -11,7 +11,7 @@ Planned milestones for upbox. Dates are targets, not commitments. See [PLAN.md](
 - SQLite audit log
 - JSONL + CSV export
 
-## v0.1.1: distribution polish (target: 1–2 weeks post-v0.1)
+## v0.1.2: distribution polish (target: 1–2 weeks post-v0.1)
 
 - **Native binaries:** single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
 - Firefox NSS auto-install on Windows.
