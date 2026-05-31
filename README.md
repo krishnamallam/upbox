@@ -28,7 +28,7 @@ In 2026, the gap matters more than it did even six months ago:
 Install a local CA, point your AI tools at the upbox proxy, then watch.
 
 - **Live feed.** Every request in real time, grouped by tool (Cursor, Claude desktop, Claude Code, Copilot, ChatGPT, Codeium, Windsurf, Gemini, Perplexity, Continue, Cody, Tabnine, …). Filter by time window, status, tool, or substring search; pin the rows you care about.
-- **Inspect bodies.** Tabbed detail panel: request body, headers, fired redaction rules, allowlist verdict, and one-click export recipes (replay `curl`, JSONL dump, `upbox export`).
+- **Inspect bodies.** Tabbed detail panel: request body (JSON pretty-printed), headers, fired redaction rules, allowlist verdict, and one-click export recipes (replay `curl`, JSONL dump, `upbox export`).
 - **Redact before forwarding.** Regex rules strip `.env` blocks, API keys, and PII patterns *before* the request reaches the cloud.
 - **Domain enforcement.** Allowlist destinations per tool. Off-allowlist requests are either **flagged** (forwarded to the cloud, but marked) or **blocked** (stopped with a 403), set per tool in `allowlist.yaml`. Flagged is not blocked: the dashboard always tells you which requests actually left.
 - **Audit log.** JSON Lines + CSV export. Tamper-evident hash chain. Article-26-friendly fields.
@@ -233,6 +233,7 @@ The proxy and dashboard never talk to each other directly. They share state thro
 **What upbox itself does**
 - Reads your AI traffic via a local CA you install (and can uninstall).
 - Stores audit data in `~/.upbox/upbox.db` (SQLite; encrypted-at-rest planned for v0.2).
+- Stores each request body up to a **100 KB cap** (`BODY_EXCERPT_MAX`), after redaction strips secrets. Bodies are recorded with a SHA-256 hash and their true size, so a truncated body is still provable and clearly marked in the dashboard rather than silently cut. The dashboard pretty-prints JSON bodies.
 - Serves the dashboard on `127.0.0.1` only.
 - Never makes outbound network calls of its own.
 

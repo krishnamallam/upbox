@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from upbox.dashboard.app import create_app
-from upbox.db.store import RequestRecord, Store
+from upbox.dashboard.app import _pretty_json, create_app
+from upbox.db.store import BODY_EXCERPT_MAX, RequestRecord, Store
 
 
 @pytest.fixture
@@ -359,6 +359,107 @@ def test_detail_body_escapes_html_in_excerpt(tmp_path: Path) -> None:
     # The literal script tag must not survive into the rendered HTML.
     assert "<script>alert(1)</script>" not in response.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
+
+
+def test_pretty_json_indents_valid_json() -> None:
+    assert _pretty_json('{"b": 2, "a": 1}') == '{\n  "b": 2,\n  "a": 1\n}'
+
+
+def test_pretty_json_passes_through_truncated_json() -> None:
+    assert _pretty_json('{"a": 1, "b": ') == '{"a": 1, "b": '
+
+
+def test_pretty_json_passes_through_non_json() -> None:
+    assert _pretty_json("not json at all") == "not json at all"
+
+
+def test_detail_body_formats_compact_json(tmp_path: Path) -> None:
+    db = tmp_path / "fmt.db"
+    with Store(db) as s:
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:00",
+                tool="Cursor",
+                method="POST",
+                scheme="https",
+                host="api.cursor.sh",
+                path="/v1/chat",
+                req_bytes=28,
+                resp_bytes=100,
+                status=200,
+                headers_json="{}",
+                body_excerpt='{"prompt":"hi","model":"x"}',
+                body_hash="abc",
+                redactions_applied_json=None,
+                enforcement=None,
+            )
+        )
+    with TestClient(create_app(db)) as c:
+        response = c.get("/requests/1?tab=body")
+
+    # json.dumps adds the space after the colon that the compact body lacks,
+    # so its presence proves the body was reformatted, not echoed verbatim.
+    assert "&#34;prompt&#34;: &#34;hi&#34;" in response.text
+
+
+def test_detail_body_highlights_redaction_in_formatted_json(tmp_path: Path) -> None:
+    db = tmp_path / "fmt_redact.db"
+    with Store(db) as s:
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:00",
+                tool="Cursor",
+                method="POST",
+                scheme="https",
+                host="api.cursor.sh",
+                path="/v1/chat",
+                req_bytes=40,
+                resp_bytes=100,
+                status=200,
+                headers_json="{}",
+                body_excerpt='{"key":"[REDACTED:openai-key]"}',
+                body_hash="abc",
+                redactions_applied_json='[{"rule":"openai-key","count":1}]',
+                enforcement=None,
+            )
+        )
+    with TestClient(create_app(db)) as c:
+        response = c.get("/requests/1?tab=body")
+
+    assert '<span class="red">[REDACTED:openai-key]</span>' in response.text
+
+
+def test_detail_body_shows_truncation_note_when_oversized(tmp_path: Path) -> None:
+    db = tmp_path / "trunc.db"
+    with Store(db) as s:
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:00",
+                tool="Cursor",
+                method="POST",
+                scheme="https",
+                host="api.cursor.sh",
+                path="/v1/chat",
+                req_bytes=BODY_EXCERPT_MAX + 50_000,
+                resp_bytes=100,
+                status=200,
+                headers_json="{}",
+                body_excerpt='{"prompt":"hi"}',
+                body_hash="abc",
+                redactions_applied_json=None,
+                enforcement=None,
+            )
+        )
+    with TestClient(create_app(db)) as c:
+        response = c.get("/requests/1?tab=body")
+
+    assert "Full body not stored" in response.text
+
+
+def test_detail_body_omits_truncation_note_when_within_cap(client: TestClient) -> None:
+    response = client.get("/requests/1?tab=body")
+
+    assert "full body not stored" not in response.text
 
 
 def test_export_streams_filtered_jsonl(mixed_db: Path) -> None:

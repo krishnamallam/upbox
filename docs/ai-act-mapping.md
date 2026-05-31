@@ -29,7 +29,7 @@ The audit log table (`requests` in `~/.upbox/upbox.db`) records:
 | `method`, `scheme`, `host`, `path` | Destination of the call |
 | `req_bytes`, `resp_bytes`, `status` | Size and outcome |
 | `headers_json` | Full request headers |
-| `body_excerpt` | First 4 KB of the request body |
+| `body_excerpt` | First 100 KB of the request body |
 | `body_hash` | SHA-256 of the full body for integrity |
 | `redactions_applied_json` | What redaction rules fired |
 | `blocked` | Whether enforcement intervened |

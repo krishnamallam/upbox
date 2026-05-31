@@ -1,8 +1,8 @@
 """Tests for upbox/db/store.py.
 
 The eng-review pinned three Day-3 assertions: WAL mode is actually on,
-body excerpt is exactly the first 4 KB when input is larger, and addon
-exceptions don't bring down the proxy. The third is in test_capture.py;
+body excerpt is capped at ``BODY_EXCERPT_MAX`` when input is larger, and
+addon exceptions don't bring down the proxy. The third is in test_capture.py;
 the first two live here, plus basic insert/query behaviour.
 """
 
@@ -68,7 +68,7 @@ def test_insert_request_returns_rowid(tmp_store: Store) -> None:
     assert rowid == 1
 
 
-def test_truncate_body_excerpt_caps_at_4kb() -> None:
+def test_truncate_body_excerpt_caps_at_max() -> None:
     big = b"x" * (BODY_EXCERPT_MAX + 1024)
 
     result = truncate_body_excerpt(big)

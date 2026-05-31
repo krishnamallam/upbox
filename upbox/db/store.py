@@ -21,7 +21,12 @@ from pathlib import Path
 from typing import IO, Any, cast
 
 DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
-BODY_EXCERPT_MAX = 4096
+# Cap stored request bodies at 100 KB. The proxy still forwards the full body;
+# this only bounds what lands in the audit DB. ``body_hash`` covers the whole
+# body for integrity, ``req_bytes`` records the true size. Bigger than the old
+# 4 KB so large prompt/telemetry payloads are captured whole for the Article 26
+# "what was sent" record, while still bounding DB growth.
+BODY_EXCERPT_MAX = 100 * 1024
 
 
 @dataclass(frozen=True)

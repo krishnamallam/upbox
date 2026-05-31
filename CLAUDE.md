@@ -25,5 +25,5 @@ uv run upbox start                      # proxy + dashboard
 ## Don'ts
 
 - Don't expand beyond `PLAN.md` v0.1 scope. v0.2 carries the compliance work.
-- Don't log secrets, prompt bodies in full, or request bodies past the 4 KB cap.
+- Don't log secrets or persist request bodies past the 100 KB cap. The redaction engine strips secrets before anything is stored.
 - Don't bypass the redaction engine. If a flow can't be redacted safely, drop it.

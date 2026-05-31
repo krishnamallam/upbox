@@ -15,7 +15,7 @@ import pytest
 from mitmproxy.test import tflow, tutils
 
 from upbox.addons.capture import CaptureAddon
-from upbox.db.store import Store
+from upbox.db.store import BODY_EXCERPT_MAX, Store
 
 
 @pytest.fixture
@@ -127,10 +127,10 @@ def test_capture_addon_continues_after_exception(
 
 def test_capture_addon_truncates_body_excerpt(store: Store) -> None:
     addon = CaptureAddon(store)
-    big_body = b"x" * 10_000
+    big_body = b"x" * (BODY_EXCERPT_MAX + 10_000)
 
     addon.response(_flow(req_body=big_body))
     row = store.query_recent()[0]
 
     assert row["body_excerpt"] is not None
-    assert len(row["body_excerpt"].encode("utf-8")) == 4096
+    assert len(row["body_excerpt"].encode("utf-8")) == BODY_EXCERPT_MAX
