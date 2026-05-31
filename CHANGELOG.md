@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.1.1 (2026-05-31)
+
+Dashboard readability and a larger body cap, plus a docs restructuring.
+
+### Changed
+
+- Request bodies are now stored up to **100 KB** (was 4 KB). `body_hash`
+  (SHA-256 of the full body) and `req_bytes` (true size) are unchanged, so
+  integrity and real-size reporting still hold. The 4 KB value was a
+  database-size heuristic, not a compliance floor; 100 KB captures typical
+  prompt and telemetry payloads whole for the Article 26 "what was sent"
+  record while still bounding growth. Adjust `BODY_EXCERPT_MAX` in
+  `upbox/db/store.py` for a different ceiling.
+- The dashboard **pretty-prints JSON request bodies** instead of rendering one
+  compact line. Redaction markers stay highlighted in the formatted output.
+  Non-JSON or truncated bodies are shown verbatim.
+
+### Added
+
+- Body tab shows a "first 100 KB of N" notice when a request body exceeds the
+  cap, instead of silently cutting it off.
+
+### Documentation
+
+- Architecture diagram corrected to show the supervisor plus the separate
+  proxy and dashboard processes, with SQLite WAL as the IPC.
+- Roadmap moved to `ROADMAP.md`; added `CONTRIBUTING.md` (dev setup, PR
+  conventions, release process). README trimmed: dropped badges and marketing
+  voice, collapsed install methods to three with the rest in
+  `docs/installing.md`.
+
+### Internal
+
+- Release workflow grants `contents: write` and uses `skip-existing` so a
+  re-run does not fail on an already-published file.
+
 ## v0.1.0 — 2026-05-27
 
 Initial public release. Single-machine AI tool traffic auditor: local
@@ -73,7 +109,7 @@ flagged/blocked split, the `blocked`→`enforcement` schema migration,
 dashboard routes + filter/tab rendering, and supervisor child-death
 handling.
 
-## v0.1.1 — distribution polish (planned ~2 weeks post-v0.1)
+## v0.1.2 — distribution polish (planned ~2 weeks post-v0.1)
 
 - **Native binaries** distributed via GitHub Releases:
   - Windows: single-file `upbox.exe` (PyInstaller, ~50 MB, no
