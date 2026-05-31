@@ -10,19 +10,23 @@ only and refuses to start on any other host.
 ## What happens to my request bodies?
 
 They are stored locally in `~/.upbox/upbox.db` (SQLite, WAL mode). The
-`body_excerpt` column holds the first 4 KB; full bodies are not
-persisted. `body_hash` (SHA-256 of the full body) is recorded for
-integrity.
+`body_excerpt` column holds the first 100 KB; anything past that is not
+persisted. `body_hash` (SHA-256 of the full body) and `req_bytes` (true
+size) are recorded, so the dashboard can prove integrity and show how
+big the body really was even when it was truncated.
 
-The 4 KB cap is intentional — it keeps the database small while
-preserving enough context for the dashboard. Adjust the
-`BODY_EXCERPT_MAX` constant in `upbox/db/store.py` if you need more.
+The 100 KB cap bounds database growth while capturing typical prompt and
+telemetry payloads whole. The dashboard pretty-prints JSON bodies and,
+when a body exceeds the cap, shows a "first 100 KB of N" notice instead
+of silently cutting. Adjust the `BODY_EXCERPT_MAX` constant in
+`upbox/db/store.py` if you need a different ceiling.
 
 ## How big does the database get?
 
-Per request: ~5 KB on average (headers + 4 KB body excerpt + metadata).
-Heavy use (~500 requests/day from Cursor, Claude, ChatGPT combined) is
-roughly 2.5 MB/day or ~900 MB/year. Configurable retention lands in
+It depends on how large your bodies are. Headers + metadata are ~1 KB
+per request; the body excerpt adds up to 100 KB, but only for requests
+that actually send that much (most are far smaller). A request with a
+truncated body stores the full 100 KB. Configurable retention lands in
 v0.2; for now, manual:
 
 ```sh

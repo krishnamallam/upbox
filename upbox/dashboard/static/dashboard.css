@@ -904,6 +904,13 @@ pre.body .red {
 }
 .sec-h:first-child { margin-top: 0; }
 
+.body-note {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  margin: 0 0 8px;
+}
+
 .headers {
   font-family: var(--font-mono);
   font-size: 12px;

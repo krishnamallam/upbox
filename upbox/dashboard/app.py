@@ -23,7 +23,7 @@ from markupsafe import Markup, escape
 
 from upbox import settings
 from upbox.dashboard.icons import icon_for
-from upbox.db.store import DEFAULT_DB_PATH, Store
+from upbox.db.store import BODY_EXCERPT_MAX, DEFAULT_DB_PATH, Store
 
 
 def _resource_dir(name: str) -> Path:
@@ -92,6 +92,29 @@ def _from_json(value: str | None) -> Any:
 
 
 templates.env.filters["from_json"] = _from_json
+
+
+def _pretty_json(value: str | None) -> str | None:
+    """Indent a JSON request body for display.
+
+    AI tools send JSON as one compact line; rendered verbatim it's a wall of
+    text. When the excerpt parses as JSON we re-emit it indented. When it does
+    not (a non-JSON body, or one truncated past ``BODY_EXCERPT_MAX`` so the tail
+    is incomplete) we return it unchanged rather than show nothing.
+    ``ensure_ascii=False`` keeps unicode readable; the caller still escapes for
+    HTML and highlights ``[REDACTED:...]`` tokens via ``redact_marks``.
+    """
+    if not value:
+        return value
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return value
+    return json.dumps(parsed, indent=2, ensure_ascii=False)
+
+
+templates.env.filters["pretty_json"] = _pretty_json
+templates.env.globals["body_excerpt_max"] = BODY_EXCERPT_MAX
 
 
 _REDACT_TOKEN_RE = re.compile(r"\[REDACTED:[A-Za-z0-9._\- ]{1,60}\]")
