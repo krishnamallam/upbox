@@ -111,19 +111,8 @@ handling.
 
 ## v0.1.2 — distribution polish (planned ~2 weeks post-v0.1)
 
-- **Native binaries** distributed via GitHub Releases:
-  - Windows: single-file `upbox.exe` (PyInstaller, ~50 MB, no
-    Python needed on the host).
-  - macOS: signed `.dmg` or Homebrew tap formula.
-  - Linux: AppImage (universal across distros).
 - Firefox NSS auto-install on Windows.
 - Live-reload of rule files (currently requires `upbox start` restart).
-
-The `.exe` work is deferred from v0.1.0 because: (a) mitmproxy +
-PyInstaller has known footguns that take iteration to get right, and
-(b) unsigned PyInstaller binaries hit Windows Defender's heuristic
-on roughly 1 in 5 machines — fixing that needs a $300/yr code-signing
-cert that's better acquired calmly than under launch-day pressure.
 
 ## v0.2 — compliance-ready (planned 2026-08-01)
 
@@ -133,3 +122,17 @@ cert that's better acquired calmly than under launch-day pressure.
 - Encrypted-at-rest SQLite.
 - Team mode (LAN-local central dashboard, multiple endpoints).
 - Configurable retention.
+
+## v0.3 and beyond (planned)
+
+- **Native binaries** distributed via GitHub Releases:
+  - Windows: single-file `upbox.exe` (PyInstaller, ~50 MB, no
+    Python needed on the host).
+  - macOS: signed `.dmg` or Homebrew tap formula.
+  - Linux: AppImage (universal across distros).
+
+  Deferred because: (a) mitmproxy + PyInstaller has known footguns that
+  take iteration to get right, and (b) unsigned PyInstaller binaries hit
+  Windows Defender's heuristic on roughly 1 in 5 machines, which needs a
+  $300/yr code-signing cert that's better acquired calmly than under
+  launch pressure.
