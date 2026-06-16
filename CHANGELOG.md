@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.1.2 (2026-06-16)
+
+Live-reload of rule files and a redaction-leak fix.
+
+### Added
+
+- The running proxy now **reloads rule files in place**. Editing `tools.yaml`,
+  `redact.yaml`, or `allowlist.yaml` (via the dashboard or by hand) applies within
+  ~2s — no `upbox start` restart. A failed edit (bad YAML or uncompilable regex)
+  keeps the previously-loaded config and is logged; it never crashes the proxy or
+  blanks the rules. Adding a brand-new intercepted host still needs a restart
+  (the TLS `allow_hosts` set is fixed at boot).
+- Redaction coverage for Google API keys, Slack tokens, GitHub fine-grained and
+  server tokens, and generic `Authorization: Bearer` values.
+
+### Fixed
+
+- **Anthropic and OpenAI API keys were leaking unredacted.** The bundled patterns
+  predate base64url key formats, so real modern keys (`sk-ant-api03-…` with `_`,
+  `sk-proj-…` / `sk-svcacct-…`) did not match and were forwarded to the cloud.
+  Patterns now tolerate `-`/`_` and the modern prefixes; `anthropic-key` is ordered
+  before `openai-key` so keys are labelled correctly.
+
+### Changed
+
+- Rule writes from the dashboard are now atomic (`os.replace`), so the watcher
+  never reads a half-written file. The save confirmation notes the change applies
+  automatically.
+
 ## v0.1.1 (2026-05-31)
 
 Dashboard readability and a larger body cap, plus a docs restructuring.

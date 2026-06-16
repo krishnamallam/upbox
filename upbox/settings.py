@@ -8,6 +8,7 @@ on disk.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from importlib import resources
@@ -59,10 +60,8 @@ def validate_and_write(kind: str, raw_text: str) -> tuple[bool, str]:
             handle.write(raw_text)
         os.replace(tmp, target)  # atomic on POSIX + Windows; no partial read
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
     return (
         True,

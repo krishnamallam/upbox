@@ -5,8 +5,9 @@ cloud LLM. Patterns are loaded from `~/.upbox/rules/redact.yaml`
 (falling back to bundled defaults if absent).
 
 You can edit the YAML in-place, or use the dashboard's `/settings` page.
-After editing, restart `upbox start` for changes to apply (live reload
-lands in v0.1.1).
+As of v0.1.2, edits apply automatically: the running proxy reloads `tools.yaml`,
+`redact.yaml`, and `allowlist.yaml` within ~2 seconds, no restart needed. (Adding
+a brand-new host to intercept still requires an `upbox start` restart.)
 
 ## Schema
 
