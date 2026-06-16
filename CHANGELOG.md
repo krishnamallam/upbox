@@ -13,7 +13,7 @@ Live-reload of rule files and a redaction-leak fix.
   blanks the rules. Adding a brand-new intercepted host still needs a restart
   (the TLS `allow_hosts` set is fixed at boot).
 - Redaction coverage for Google API keys, Slack tokens, GitHub fine-grained and
-  server tokens, and generic `Authorization: Bearer` values.
+  server tokens, and generic `Bearer <token>` values appearing in request bodies.
 
 ### Fixed
 

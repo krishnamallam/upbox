@@ -37,7 +37,7 @@ a brand-new host to intercept still requires an `upbox start` restart.)
 | `github-fine-grained` | `github_pat_[0-9A-Za-z_]{22,}` | GitHub fine-grained PATs |
 | `github-server-token` | `ghs_[A-Za-z0-9]{36}` | GitHub server tokens |
 | `github-token` | `ghp_[A-Za-z0-9]{36}` | GitHub classic PATs |
-| `bearer-token` | `Bearer\s+[A-Za-z0-9._~+/=-]{8,}` | `Authorization: Bearer` values |
+| `bearer-token` | `Bearer\s+[A-Za-z0-9._~+/=-]{8,}` | `Bearer <token>` in request bodies |
 | `dotenv-block` | `^[A-Z_][A-Z0-9_]*=.+$` (multiline) | One `.env` line at a time |
 
 ## How redaction is applied
