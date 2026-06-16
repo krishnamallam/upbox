@@ -197,7 +197,7 @@ def test_realistic_openai_project_key_is_redacted() -> None:
     assert key not in json.loads(flow.request.content)["prompt"]
 
 
-def test_short_sk_prefixed_word_is_not_over_redacted() -> None:
+def test_short_sk_prefixed_word_below_length_floor_is_not_redacted() -> None:
     addon = RedactAddon()
     flow = _flow(json.dumps({"prompt": "the sk-cache layer"}).encode())
 
@@ -244,3 +244,13 @@ def test_bearer_token_in_text_body_is_redacted() -> None:
     addon.request(flow)
 
     assert b"abcDEF1234567890longtoken" not in flow.request.content
+
+
+def test_anthropic_key_is_labelled_anthropic_not_openai() -> None:
+    addon = RedactAddon()
+    key = "sk-ant-api03-" + "aB3_dEf4G" * 6
+    flow = _flow(json.dumps({"prompt": key}).encode())
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_redactions"] == {"applied": ["anthropic-key"]}
