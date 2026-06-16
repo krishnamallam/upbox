@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from mitmproxy.test import tflow, tutils
 
+from upbox.addons import enforce
 from upbox.addons.enforce import EnforceAddon, ToolPolicy
 
 
@@ -96,3 +97,31 @@ def test_bundled_allowlist_yaml_parses() -> None:
     policies = load_policies()
 
     assert "default" in policies
+
+
+def test_reload_swaps_policies(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "allowlist.yaml"
+    monkeypatch.setattr(enforce, "USER_RULES_PATH", rules)
+    rules.write_text("Cursor:\n  allow: [api.cursor.sh]\n  block_unknown: warn\n")
+    addon = EnforceAddon()
+    rules.write_text("Cursor:\n  allow: [only.example.com]\n  block_unknown: block\n")
+
+    addon.reload()
+    flow = _flow(host="api.cursor.sh", tool="Cursor")
+    addon.request(flow)
+
+    assert flow.metadata["upbox_enforcement"] == "blocked"
+
+
+def test_reload_keeps_old_policies_on_malformed_yaml(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "allowlist.yaml"
+    monkeypatch.setattr(enforce, "USER_RULES_PATH", rules)
+    rules.write_text("Cursor:\n  allow: [api.cursor.sh]\n  block_unknown: warn\n")
+    addon = EnforceAddon()
+    rules.write_text("{ not: valid: yaml: [")
+
+    addon.reload()  # must not raise; keeps previously-loaded policies
+    flow = _flow(host="api.cursor.sh", tool="Cursor")
+    addon.request(flow)
+
+    assert "upbox_enforcement" not in flow.metadata

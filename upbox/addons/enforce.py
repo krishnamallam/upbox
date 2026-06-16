@@ -73,6 +73,16 @@ class EnforceAddon:
     def __init__(self, policies: dict[str, ToolPolicy] | None = None) -> None:
         self._policies = policies if policies is not None else load_policies()
 
+    def reload(self) -> None:
+        """Re-read allowlist.yaml and swap policies. Keeps the old set on failure."""
+        try:
+            new_policies = load_policies()
+        except Exception:
+            log.exception("enforce reload failed; keeping previous policies")
+            return
+        self._policies = new_policies
+        log.info("reloaded allowlist.yaml (%d policies)", len(new_policies))
+
     def request(self, flow: http.HTTPFlow) -> None:
         try:
             self._check(flow)
