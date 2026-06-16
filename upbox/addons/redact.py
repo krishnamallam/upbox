@@ -75,6 +75,16 @@ class RedactAddon:
     def __init__(self, patterns: list[RedactPattern] | None = None) -> None:
         self._patterns = patterns if patterns is not None else load_patterns()
 
+    def reload(self) -> None:
+        """Re-read the rule file and swap patterns. Keeps the old set on failure."""
+        try:
+            new_patterns = load_patterns()
+        except Exception:
+            log.exception("redact reload failed; keeping previous patterns")
+            return
+        self._patterns = new_patterns
+        log.info("reloaded redact.yaml (%d patterns)", len(new_patterns))
+
     def request(self, flow: http.HTTPFlow) -> None:
         try:
             self._apply(flow)

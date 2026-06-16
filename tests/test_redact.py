@@ -16,6 +16,7 @@ import re
 import pytest
 from mitmproxy.test import tflow, tutils
 
+from upbox.addons import redact
 from upbox.addons.redact import RedactAddon, RedactPattern
 
 
@@ -146,3 +147,31 @@ def test_bundled_redact_yaml_compiles() -> None:
     patterns = load_patterns()
 
     assert any(p.name == "openai-key" for p in patterns)
+
+
+def test_reload_picks_up_rewritten_patterns(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text('- name: b\n  pattern: "BBBBBBBB"\n  replace: "[Y]"\n')
+
+    addon.reload()
+    flow = _flow(json.dumps({"p": "BBBBBBBB"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[Y]"
+
+
+def test_reload_keeps_old_patterns_on_uncompilable_regex(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text('- name: bad\n  pattern: "[unterminated"\n  replace: "[Y]"\n')
+
+    addon.reload()  # must not raise; keeps previously-loaded patterns
+    flow = _flow(json.dumps({"p": "AAAAAAAA"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[X]"
