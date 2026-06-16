@@ -125,3 +125,17 @@ def test_reload_keeps_old_policies_on_malformed_yaml(tmp_path, monkeypatch) -> N
     addon.request(flow)
 
     assert "upbox_enforcement" not in flow.metadata
+
+
+def test_reload_keeps_old_policies_when_new_ruleset_is_empty(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "allowlist.yaml"
+    monkeypatch.setattr(enforce, "USER_RULES_PATH", rules)
+    rules.write_text("Cursor:\n  allow: [api.cursor.sh]\n  block_unknown: block\n")
+    addon = EnforceAddon()
+    rules.write_text("{}\n")
+
+    addon.reload()  # empty ruleset must NOT drop enforcement
+    flow = _flow(host="api.evil.example", tool="Cursor")
+    addon.request(flow)
+
+    assert flow.metadata["upbox_enforcement"] == "blocked"

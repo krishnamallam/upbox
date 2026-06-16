@@ -254,3 +254,17 @@ def test_anthropic_key_is_labelled_anthropic_not_openai() -> None:
     addon.request(flow)
 
     assert flow.metadata["upbox_redactions"] == {"applied": ["anthropic-key"]}
+
+
+def test_reload_keeps_old_patterns_when_new_ruleset_is_empty(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text("[]\n")
+
+    addon.reload()  # empty ruleset must NOT disable redaction
+    flow = _flow(json.dumps({"p": "AAAAAAAA"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[X]"

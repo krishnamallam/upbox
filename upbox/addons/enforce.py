@@ -80,6 +80,11 @@ class EnforceAddon:
         except Exception:
             log.exception("enforce reload failed; keeping previous policies")
             return
+        if not new_policies:
+            log.warning(
+                "allowlist.yaml reloaded with no policies; keeping previous enforcement policies"
+            )
+            return
         self._policies = new_policies
         log.info("reloaded allowlist.yaml (%d policies)", len(new_policies))
 

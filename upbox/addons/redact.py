@@ -82,6 +82,9 @@ class RedactAddon:
         except Exception:
             log.exception("redact reload failed; keeping previous patterns")
             return
+        if not new_patterns:
+            log.warning("redact.yaml reloaded with no patterns; keeping previous redaction rules")
+            return
         self._patterns = new_patterns
         log.info("reloaded redact.yaml (%d patterns)", len(new_patterns))
 

@@ -116,6 +116,9 @@ class FingerprintAddon:
         except Exception:
             log.exception("fingerprint reload failed; keeping previous rules")
             return
+        if not new_rules:
+            log.warning("tools.yaml reloaded with no rules; keeping previous fingerprint rules")
+            return
         self._rules = new_rules
         log.info("reloaded tools.yaml (%d rules)", len(new_rules))
 
