@@ -65,10 +65,10 @@ async def test_watch_isolates_per_file(tmp_path: Path) -> None:
 
     b.write_text("b2")
     os.utime(b, (_FUTURE, _FUTURE))
-    await _wait_until(lambda: bool(fired_b))
+    fired_b_first = await _wait_until(lambda: bool(fired_b))
     task.cancel()
 
-    assert fired_a == []
+    assert fired_b_first and fired_a == []
 
 
 async def test_watch_reloads_on_first_appearance(tmp_path: Path) -> None:
