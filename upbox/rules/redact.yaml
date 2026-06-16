@@ -4,22 +4,46 @@
 # `pattern` is a Python regex. `replace` is the literal string to substitute
 # in place of each match. `multiline` enables MULTILINE mode for the dotenv
 # pattern so it matches per-line.
+#
+# NOTE: anthropic-key is listed before openai-key on purpose. Redaction
+# applies every pattern in file order; the more specific sk-ant- rule must
+# run first so an Anthropic key is labelled anthropic-key, not openai-key.
 
 - name: aws-access-key
   pattern: "AKIA[0-9A-Z]{16}"
   replace: "[REDACTED:aws-access-key]"
 
+- name: anthropic-key
+  pattern: "sk-ant-[A-Za-z0-9_-]{20,}"
+  replace: "[REDACTED:anthropic-key]"
+
 - name: openai-key
-  pattern: "sk-[A-Za-z0-9]{32,}"
+  pattern: "sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}"
   replace: "[REDACTED:openai-key]"
 
-- name: anthropic-key
-  pattern: "sk-ant-[A-Za-z0-9-]{32,}"
-  replace: "[REDACTED:anthropic-key]"
+- name: google-api-key
+  pattern: "AIza[0-9A-Za-z_-]{35}"
+  replace: "[REDACTED:google-api-key]"
+
+- name: slack-token
+  pattern: "xox[baprs]-[0-9A-Za-z-]{10,}"
+  replace: "[REDACTED:slack-token]"
+
+- name: github-fine-grained
+  pattern: "github_pat_[0-9A-Za-z_]{22,}"
+  replace: "[REDACTED:github-fine-grained]"
+
+- name: github-server-token
+  pattern: "ghs_[A-Za-z0-9]{36}"
+  replace: "[REDACTED:github-server-token]"
 
 - name: github-token
   pattern: "ghp_[A-Za-z0-9]{36}"
   replace: "[REDACTED:github-token]"
+
+- name: bearer-token
+  pattern: "Bearer\\s+[A-Za-z0-9._~+/=-]{8,}"
+  replace: "Bearer [REDACTED:bearer-token]"
 
 - name: dotenv-block
   pattern: "^[A-Z_][A-Z0-9_]*=.+$"

@@ -175,3 +175,72 @@ def test_reload_keeps_old_patterns_on_uncompilable_regex(tmp_path, monkeypatch) 
     addon.request(flow)
 
     assert json.loads(flow.request.content)["p"] == "[X]"
+
+
+def test_realistic_anthropic_key_is_redacted() -> None:
+    addon = RedactAddon()  # bundled redact.yaml
+    key = "sk-ant-api03-" + "aB3_dEf4G" * 6  # base64url: contains '_' and '-'
+    flow = _flow(json.dumps({"prompt": f"my key {key}"}).encode())
+
+    addon.request(flow)
+
+    assert key not in json.loads(flow.request.content)["prompt"]
+
+
+def test_realistic_openai_project_key_is_redacted() -> None:
+    addon = RedactAddon()
+    key = "sk-proj-" + "aB3_dEf4G" * 6
+    flow = _flow(json.dumps({"prompt": f"my key {key}"}).encode())
+
+    addon.request(flow)
+
+    assert key not in json.loads(flow.request.content)["prompt"]
+
+
+def test_short_sk_prefixed_word_is_not_over_redacted() -> None:
+    addon = RedactAddon()
+    flow = _flow(json.dumps({"prompt": "the sk-cache layer"}).encode())
+
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["prompt"] == "the sk-cache layer"
+
+
+def test_google_api_key_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "AIza" + "A" * 35
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_slack_token_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "xoxb-" + "1234567890" + "ABCDEF"
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_github_fine_grained_pat_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "github_pat_" + "A" * 30
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_bearer_token_in_text_body_is_redacted() -> None:
+    addon = RedactAddon()
+    body = b"Authorization: Bearer " + b"abcDEF1234567890longtoken"
+    flow = _flow(body, content_type="text/plain")
+
+    addon.request(flow)
+
+    assert b"abcDEF1234567890longtoken" not in flow.request.content
