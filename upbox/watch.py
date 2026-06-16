@@ -13,6 +13,12 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from upbox.addons.enforce import EnforceAddon
+    from upbox.addons.fingerprint import FingerprintAddon
+    from upbox.addons.redact import RedactAddon
 
 log = logging.getLogger(__name__)
 
@@ -56,3 +62,47 @@ def watch_rules(targets: list[Target], poll_interval: float = 1.0) -> Coroutine[
                     log.exception("rule reload failed for %s", path)
 
     return _loop()
+
+
+def build_rule_watch_targets(
+    fingerprint: FingerprintAddon,
+    redact: RedactAddon,
+    enforce: EnforceAddon,
+) -> list[Target]:
+    """Pair each rule file (each addon module's own path constant) with its reload."""
+    from upbox.addons import enforce as enforce_mod
+    from upbox.addons import fingerprint as fingerprint_mod
+    from upbox.addons import redact as redact_mod
+
+    return [
+        (fingerprint_mod.USER_RULES_PATH, fingerprint.reload),
+        (redact_mod.USER_RULES_PATH, redact.reload),
+        (enforce_mod.USER_RULES_PATH, enforce.reload),
+    ]
+
+
+class RuleReloadWatcher:
+    """mitmproxy addon: runs the rule-file watcher on the proxy's event loop."""
+
+    def __init__(self, targets: list[Target], poll_interval: float = 1.0) -> None:
+        self._targets = targets
+        self._poll_interval = poll_interval
+        self._task: asyncio.Task[None] | None = None
+
+    def running(self) -> None:
+        if self._task is not None:
+            return
+        self._task = asyncio.create_task(watch_rules(self._targets, self._poll_interval))
+        self._task.add_done_callback(self._on_done)
+
+    def done(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+
+    @staticmethod
+    def _on_done(task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error("rule watcher exited unexpectedly: %r", exc)

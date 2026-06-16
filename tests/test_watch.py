@@ -6,7 +6,10 @@ import asyncio
 import os
 from pathlib import Path
 
-from upbox.watch import watch_rules
+from upbox.addons.enforce import EnforceAddon
+from upbox.addons.fingerprint import FingerprintAddon
+from upbox.addons.redact import RedactAddon
+from upbox.watch import RuleReloadWatcher, build_rule_watch_targets, watch_rules
 
 # A timestamp far in the future, used to force a detectable mtime change
 # without depending on filesystem mtime resolution.
@@ -105,3 +108,30 @@ async def test_watch_survives_raising_reloader(tmp_path: Path) -> None:
     task.cancel()
 
     assert ok
+
+
+def test_build_targets_pairs_each_addon_path_with_its_reload() -> None:
+    from upbox.addons import enforce, fingerprint, redact
+
+    fp = FingerprintAddon()
+    rd = RedactAddon()
+    en = EnforceAddon()
+
+    targets = build_rule_watch_targets(fp, rd, en)
+
+    assert targets == [
+        (fingerprint.USER_RULES_PATH, fp.reload),
+        (redact.USER_RULES_PATH, rd.reload),
+        (enforce.USER_RULES_PATH, en.reload),
+    ]
+
+
+async def test_watcher_running_starts_task_and_done_cancels() -> None:
+    watcher = RuleReloadWatcher([])
+    watcher.running()
+    started = watcher._task is not None and not watcher._task.done()
+
+    watcher.done()
+    await asyncio.sleep(0)  # let the cancellation propagate
+
+    assert started and watcher._task is not None and watcher._task.cancelled()
