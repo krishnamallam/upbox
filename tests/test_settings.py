@@ -83,3 +83,17 @@ def test_success_message_notes_automatic_apply(tmp_rules_dir: Path) -> None:
     ok, msg = settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
 
     assert ok and "automatically" in msg
+
+
+def test_write_cleans_up_temp_file_when_replace_fails(
+    tmp_rules_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("synthetic replace failure")
+
+    monkeypatch.setattr(settings.os, "replace", boom)
+
+    with pytest.raises(OSError):
+        settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
+
+    assert list(tmp_rules_dir.iterdir()) == []
