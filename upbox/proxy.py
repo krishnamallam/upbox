@@ -21,6 +21,7 @@ from upbox.addons.enforce import EnforceAddon
 from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
+from upbox.watch import RuleReloadWatcher, build_rule_watch_targets
 
 # Curated AI-tool process list for `upbox start`'s default LocalMode spec.
 # Captures only the binaries that produce AI traffic so unrelated processes —
@@ -164,15 +165,19 @@ async def _run(
     master = DumpMaster(opts)
 
     store = Store()
+    fingerprint = FingerprintAddon()
+    enforce = EnforceAddon()
+    redact = RedactAddon()
     # Order matters: fingerprint tags the tool, enforce checks the destination
     # (and may short-circuit with a 403), redact rewrites the body, then
     # capture (response hook) persists the final state including
-    # block/redaction metadata.
+    # block/redaction metadata. The watcher reloads rule files in place.
     master.addons.add(  # type: ignore[no-untyped-call]
-        FingerprintAddon(),
-        EnforceAddon(),
-        RedactAddon(),
+        fingerprint,
+        enforce,
+        redact,
         CaptureAddon(store),
+        RuleReloadWatcher(build_rule_watch_targets(fingerprint, redact, enforce)),
     )
 
     try:

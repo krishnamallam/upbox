@@ -62,3 +62,38 @@ def test_validate_and_write_rejects_redact_missing_required_field(tmp_rules_dir:
     ok, _ = settings.validate_and_write("redact", "- name: missing-pattern\n")
 
     assert not ok
+
+
+def test_write_leaves_no_temp_file_in_dir(tmp_rules_dir: Path) -> None:
+    settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
+
+    assert [p.name for p in tmp_rules_dir.iterdir()] == ["redact.yaml"]
+
+
+def test_invalid_write_after_valid_keeps_prior_content(tmp_rules_dir: Path) -> None:
+    good = '- name: t\n  pattern: "X"\n  replace: "Y"\n'
+    settings.validate_and_write("redact", good)
+
+    settings.validate_and_write("redact", "not: valid: yaml: [")
+
+    assert (tmp_rules_dir / "redact.yaml").read_text() == good
+
+
+def test_success_message_notes_automatic_apply(tmp_rules_dir: Path) -> None:
+    ok, msg = settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
+
+    assert ok and "automatically" in msg
+
+
+def test_write_cleans_up_temp_file_when_replace_fails(
+    tmp_rules_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("synthetic replace failure")
+
+    monkeypatch.setattr(settings.os, "replace", boom)
+
+    with pytest.raises(OSError):
+        settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
+
+    assert list(tmp_rules_dir.iterdir()) == []

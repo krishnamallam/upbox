@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from mitmproxy.test import tflow, tutils
 
+from upbox.addons import fingerprint
 from upbox.addons.fingerprint import FingerprintAddon, ToolRule, _parse_rules
 
 
@@ -245,3 +246,45 @@ def test_bundled_rules_match_perplexity_host_only() -> None:
     addon.request(flow)
 
     assert flow.metadata["upbox_tool"] == "Perplexity"
+
+
+def test_reload_picks_up_rewritten_rules(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "tools.yaml"
+    monkeypatch.setattr(fingerprint, "USER_RULES_PATH", rules)
+    rules.write_text("- name: Old\n  match:\n    hosts: [old.example.com]\n")
+    addon = FingerprintAddon()
+    rules.write_text("- name: New\n  match:\n    hosts: [new.example.com]\n")
+
+    addon.reload()
+    flow = _flow(host="new.example.com")
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "New"
+
+
+def test_reload_keeps_old_rules_on_malformed_yaml(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "tools.yaml"
+    monkeypatch.setattr(fingerprint, "USER_RULES_PATH", rules)
+    rules.write_text("- name: Old\n  match:\n    hosts: [old.example.com]\n")
+    addon = FingerprintAddon()
+    rules.write_text("{ not: valid: yaml: [")
+
+    addon.reload()  # must not raise; keeps previously-loaded rules
+    flow = _flow(host="old.example.com")
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "Old"
+
+
+def test_reload_keeps_old_rules_when_new_ruleset_is_empty(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "tools.yaml"
+    monkeypatch.setattr(fingerprint, "USER_RULES_PATH", rules)
+    rules.write_text("- name: Old\n  match:\n    hosts: [old.example.com]\n")
+    addon = FingerprintAddon()
+    rules.write_text("[]\n")
+
+    addon.reload()  # empty ruleset must NOT clear classification
+    flow = _flow(host="old.example.com")
+    addon.request(flow)
+
+    assert flow.metadata["upbox_tool"] == "Old"

@@ -8,6 +8,9 @@ on disk.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -50,8 +53,21 @@ def validate_and_write(kind: str, raw_text: str) -> tuple[bool, str]:
     if not _structurally_valid(kind, parsed):
         return False, f"{kind}.yaml failed structural validation"
     USER_RULES_DIR.mkdir(parents=True, exist_ok=True)
-    user_path(kind).write_text(raw_text)
-    return True, f"saved to {user_path(kind)}"
+    target = user_path(kind)
+    fd, tmp = tempfile.mkstemp(dir=USER_RULES_DIR, prefix=f".{kind}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(raw_text)
+        os.replace(tmp, target)  # atomic on POSIX + Windows; no partial read
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    return (
+        True,
+        f"saved to {target} — the running proxy applies it automatically "
+        "within ~2s (no restart needed)",
+    )
 
 
 def _structurally_valid(kind: str, parsed: Any) -> bool:

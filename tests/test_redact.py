@@ -16,6 +16,7 @@ import re
 import pytest
 from mitmproxy.test import tflow, tutils
 
+from upbox.addons import redact
 from upbox.addons.redact import RedactAddon, RedactPattern
 
 
@@ -146,3 +147,124 @@ def test_bundled_redact_yaml_compiles() -> None:
     patterns = load_patterns()
 
     assert any(p.name == "openai-key" for p in patterns)
+
+
+def test_reload_picks_up_rewritten_patterns(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text('- name: b\n  pattern: "BBBBBBBB"\n  replace: "[Y]"\n')
+
+    addon.reload()
+    flow = _flow(json.dumps({"p": "BBBBBBBB"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[Y]"
+
+
+def test_reload_keeps_old_patterns_on_uncompilable_regex(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text('- name: bad\n  pattern: "[unterminated"\n  replace: "[Y]"\n')
+
+    addon.reload()  # must not raise; keeps previously-loaded patterns
+    flow = _flow(json.dumps({"p": "AAAAAAAA"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[X]"
+
+
+def test_realistic_anthropic_key_is_redacted() -> None:
+    addon = RedactAddon()  # bundled redact.yaml
+    key = "sk-ant-api03-" + "aB3_dEf4G" * 6  # base64url: contains '_' and '-'
+    flow = _flow(json.dumps({"prompt": f"my key {key}"}).encode())
+
+    addon.request(flow)
+
+    assert key not in json.loads(flow.request.content)["prompt"]
+
+
+def test_realistic_openai_project_key_is_redacted() -> None:
+    addon = RedactAddon()
+    key = "sk-proj-" + "aB3_dEf4G" * 6
+    flow = _flow(json.dumps({"prompt": f"my key {key}"}).encode())
+
+    addon.request(flow)
+
+    assert key not in json.loads(flow.request.content)["prompt"]
+
+
+def test_short_sk_prefixed_word_below_length_floor_is_not_redacted() -> None:
+    addon = RedactAddon()
+    flow = _flow(json.dumps({"prompt": "the sk-cache layer"}).encode())
+
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["prompt"] == "the sk-cache layer"
+
+
+def test_google_api_key_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "AIza" + "A" * 35
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_slack_token_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "xoxb-" + "1234567890" + "ABCDEF"
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_github_fine_grained_pat_is_redacted() -> None:
+    addon = RedactAddon()
+    sample = "github_pat_" + "A" * 30
+    flow = _flow(json.dumps({"prompt": sample}).encode())
+
+    addon.request(flow)
+
+    assert sample not in json.loads(flow.request.content)["prompt"]
+
+
+def test_bearer_token_in_text_body_is_redacted() -> None:
+    addon = RedactAddon()
+    body = b"Authorization: Bearer " + b"abcDEF1234567890longtoken"
+    flow = _flow(body, content_type="text/plain")
+
+    addon.request(flow)
+
+    assert b"abcDEF1234567890longtoken" not in flow.request.content
+
+
+def test_anthropic_key_is_labelled_anthropic_not_openai() -> None:
+    addon = RedactAddon()
+    key = "sk-ant-api03-" + "aB3_dEf4G" * 6
+    flow = _flow(json.dumps({"prompt": key}).encode())
+
+    addon.request(flow)
+
+    assert flow.metadata["upbox_redactions"] == {"applied": ["anthropic-key"]}
+
+
+def test_reload_keeps_old_patterns_when_new_ruleset_is_empty(tmp_path, monkeypatch) -> None:
+    rules = tmp_path / "redact.yaml"
+    monkeypatch.setattr(redact, "USER_RULES_PATH", rules)
+    rules.write_text('- name: a\n  pattern: "AAAAAAAA"\n  replace: "[X]"\n')
+    addon = RedactAddon()
+    rules.write_text("[]\n")
+
+    addon.reload()  # empty ruleset must NOT disable redaction
+    flow = _flow(json.dumps({"p": "AAAAAAAA"}).encode())
+    addon.request(flow)
+
+    assert json.loads(flow.request.content)["p"] == "[X]"

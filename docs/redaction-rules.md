@@ -5,8 +5,9 @@ cloud LLM. Patterns are loaded from `~/.upbox/rules/redact.yaml`
 (falling back to bundled defaults if absent).
 
 You can edit the YAML in-place, or use the dashboard's `/settings` page.
-After editing, restart `upbox start` for changes to apply (live reload
-lands in v0.1.1).
+As of v0.1.2, edits apply automatically: the running proxy reloads `tools.yaml`,
+`redact.yaml`, and `allowlist.yaml` within ~2 seconds, no restart needed. (Adding
+a brand-new host to intercept still requires an `upbox start` restart.)
 
 ## Schema
 
@@ -24,14 +25,19 @@ lands in v0.1.1).
 - `multiline: true` enables `re.MULTILINE` so `^` and `$` match at
   each line, not just the start/end of the body.
 
-## Bundled defaults (v0.1)
+## Bundled defaults (v0.1.2)
 
 | Name | Pattern | Catches |
 |---|---|---|
 | `aws-access-key` | `AKIA[0-9A-Z]{16}` | AWS IAM access key IDs |
-| `openai-key` | `sk-[A-Za-z0-9]{32,}` | OpenAI API keys |
-| `anthropic-key` | `sk-ant-[A-Za-z0-9-]{32,}` | Anthropic API keys |
-| `github-token` | `ghp_[A-Za-z0-9]{36}` | GitHub personal access tokens |
+| `anthropic-key` | `sk-ant-[A-Za-z0-9_-]{20,}` | Anthropic API keys (incl. `sk-ant-api03-…`) |
+| `openai-key` | `sk-(?:proj-\|svcacct-\|admin-)?[A-Za-z0-9_-]{32,}` | OpenAI keys (legacy + `sk-proj-…`) |
+| `google-api-key` | `AIza[0-9A-Za-z_-]{35}` | Google API keys |
+| `slack-token` | `xox[baprs]-[0-9A-Za-z-]{10,}` | Slack tokens |
+| `github-fine-grained` | `github_pat_[0-9A-Za-z_]{22,}` | GitHub fine-grained PATs |
+| `github-server-token` | `ghs_[A-Za-z0-9]{36}` | GitHub server tokens |
+| `github-token` | `ghp_[A-Za-z0-9]{36}` | GitHub classic PATs |
+| `bearer-token` | `Bearer\s+[A-Za-z0-9._~+/=-]{8,}` | `Bearer <token>` in request bodies |
 | `dotenv-block` | `^[A-Z_][A-Z0-9_]*=.+$` (multiline) | One `.env` line at a time |
 
 ## How redaction is applied
@@ -71,7 +77,9 @@ Or your own internal token:
 ## Verifying a rule
 
 1. Edit `~/.upbox/rules/redact.yaml` (or use the `/settings` page).
-2. Restart `upbox start`.
+2. Wait ~2 seconds — the running proxy applies rule-file changes automatically,
+   no restart needed (a restart is only needed when adding a brand-new
+   intercepted host).
 3. Make an AI request containing the secret you want to test.
 4. Open the request detail in the dashboard — the `Redactions` field
    shows `applied: [<rule-name>]` if the rule fired.

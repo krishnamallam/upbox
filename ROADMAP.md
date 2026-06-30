@@ -16,10 +16,14 @@ Planned milestones for upbox. Dates are targets, not commitments. See [PLAN.md](
 - Dashboard pretty-prints JSON request bodies
 - Request body cap raised to 100 KB (was 4 KB), with an honest truncation notice when a body exceeds it
 
-## v0.1.2: distribution polish (target: 1–2 weeks post-v0.1)
+## v0.1.2: distribution polish (live-reload shipped 2026-06-16)
 
-- Firefox NSS auto-install on Windows.
-- Live-reload of YAML rule files (currently requires `upbox start` restart).
+- **Shipped:** Live-reload of YAML rule files — the running proxy applies edits to
+  `tools.yaml`, `redact.yaml`, and `allowlist.yaml` within ~2s, no restart.
+- **Shipped:** Redaction fix — modern Anthropic (`sk-ant-api03-…`) and OpenAI
+  (`sk-proj-…`) keys were leaking past the bundled patterns; now redacted, plus
+  Google / Slack / GitHub fine-grained / Bearer coverage.
+- **Pending:** Firefox NSS auto-install on Windows.
 
 ## v0.2 (target: 1 August 2026, eve of AI Act enforcement)
 

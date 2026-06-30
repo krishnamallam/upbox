@@ -109,6 +109,19 @@ class FingerprintAddon:
     def __init__(self, rules: list[ToolRule] | None = None) -> None:
         self._rules = rules if rules is not None else load_rules()
 
+    def reload(self) -> None:
+        """Re-read tools.yaml and swap rules. Keeps the old set on failure."""
+        try:
+            new_rules = load_rules()
+        except Exception:
+            log.exception("fingerprint reload failed; keeping previous rules")
+            return
+        if not new_rules:
+            log.warning("tools.yaml reloaded with no rules; keeping previous fingerprint rules")
+            return
+        self._rules = new_rules
+        log.info("reloaded tools.yaml (%d rules)", len(new_rules))
+
     def request(self, flow: http.HTTPFlow) -> None:
         try:
             flow.metadata["upbox_tool"] = self._classify(flow)
