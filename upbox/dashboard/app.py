@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -115,6 +116,83 @@ def _pretty_json(value: str | None) -> str | None:
 
 templates.env.filters["pretty_json"] = _pretty_json
 templates.env.globals["body_excerpt_max"] = BODY_EXCERPT_MAX
+
+
+def _format_body(value: str | None, content_type: str | None = None) -> str | None:
+    """Format a request body for display, by content type.
+
+    Single-object JSON is always indented (so a mislabeled body still reads
+    well). Otherwise we branch on ``Content-Type`` for structured-but-not-single
+    JSON bodies: NDJSON, SSE event streams, and form-encoded. Each formatter
+    falls back to the raw text if it can't cleanly format, so the Body tab never
+    shows worse than the verbatim excerpt and never raises. The caller still
+    HTML-escapes and highlights redaction markers afterwards.
+    """
+    if not value:
+        return value
+    pretty = _pretty_json(value)
+    if pretty != value:
+        return pretty
+    ctype = (content_type or "").split(";", 1)[0].strip().lower()
+    if ctype in {"application/x-ndjson", "application/jsonl", "application/x-jsonlines"}:
+        return _format_ndjson(value) or value
+    if ctype == "text/event-stream":
+        return _format_sse(value) or value
+    if ctype == "application/x-www-form-urlencoded":
+        return _format_form(value) or value
+    return value
+
+
+def _format_ndjson(value: str) -> str | None:
+    """Indent each line of an NDJSON / JSONL body. Returns None unless every
+    non-empty line is valid JSON (otherwise the caller keeps the raw text)."""
+    lines = [line for line in value.splitlines() if line.strip()]
+    if not lines:
+        return None
+    out: list[str] = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            return None
+        out.append(json.dumps(obj, indent=2, ensure_ascii=False))
+    return "\n\n".join(out)
+
+
+def _format_sse(value: str) -> str | None:
+    """Indent the JSON payload of each ``data:`` line in an SSE body. Non-data
+    lines are kept as-is. Returns None if no data line carried JSON."""
+    formatted_any = False
+    out: list[str] = []
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("data:"):
+            payload = stripped[len("data:") :].strip()
+            try:
+                obj = json.loads(payload)
+            except (ValueError, TypeError):
+                out.append(line)
+                continue
+            formatted_any = True
+            out.append("data: " + json.dumps(obj, indent=2, ensure_ascii=False))
+        else:
+            out.append(line)
+    return "\n".join(out) if formatted_any else None
+
+
+def _format_form(value: str) -> str | None:
+    """Render a urlencoded body as ``key = value`` lines aligned on ``=``.
+    Returns None for text without ``=`` so plain prose isn't mangled."""
+    if "=" not in value:
+        return None
+    pairs = urllib.parse.parse_qsl(value, keep_blank_values=True)
+    if not pairs:
+        return None
+    width = max(len(key) for key, _ in pairs)
+    return "\n".join(f"{key.ljust(width)} = {val}" for key, val in pairs)
+
+
+templates.env.filters["format_body"] = _format_body
 
 
 _REDACT_TOKEN_RE = re.compile(r"\[REDACTED:[A-Za-z0-9._\- ]{1,60}\]")
@@ -255,12 +333,15 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
         requested_tab = request.query_params.get("tab", "body")
         if requested_tab not in _VALID_DETAIL_TABS:
             requested_tab = "body"
+        headers = _parse_headers(row["headers_json"])
+        content_type = next((v for k, v in headers.items() if k.lower() == "content-type"), None)
         return templates.TemplateResponse(
             request,
             "partials/request_detail.html",
             {
                 "row": row,
-                "headers": _parse_headers(row["headers_json"]),
+                "headers": headers,
+                "content_type": content_type,
                 "active_tab": requested_tab,
             },
         )

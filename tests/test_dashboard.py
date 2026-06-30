@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from upbox.dashboard.app import _pretty_json, create_app
+from upbox.dashboard.app import _format_body, _pretty_json, create_app
 from upbox.db.store import BODY_EXCERPT_MAX, RequestRecord, Store
 
 
@@ -473,3 +473,95 @@ def test_export_streams_filtered_jsonl(mixed_db: Path) -> None:
     import json as _json
 
     assert _json.loads(lines[0])["host"] == "blocked.host"
+
+
+def test_format_body_indents_single_json() -> None:
+    assert _format_body('{"a":1}', "application/json") == '{\n  "a": 1\n}'
+
+
+def test_format_body_pretty_prints_ndjson() -> None:
+    assert (
+        _format_body('{"a":1}\n{"b":2}', "application/x-ndjson")
+        == '{\n  "a": 1\n}\n\n{\n  "b": 2\n}'
+    )
+
+
+def test_format_body_ndjson_falls_back_when_a_line_is_not_json() -> None:
+    assert _format_body('{"a":1}\noops', "application/x-ndjson") == '{"a":1}\noops'
+
+
+def test_format_body_formats_sse_data_payloads() -> None:
+    assert (
+        _format_body('data: {"x":1}\n\ndata: {"y":2}', "text/event-stream")
+        == 'data: {\n  "x": 1\n}\n\ndata: {\n  "y": 2\n}'
+    )
+
+
+def test_format_body_renders_form_encoded_as_key_value() -> None:
+    assert _format_body("a=1&b=2", "application/x-www-form-urlencoded") == "a = 1\nb = 2"
+
+
+def test_format_body_form_ignores_plain_text_without_pairs() -> None:
+    assert _format_body("just some prose", "application/x-www-form-urlencoded") == "just some prose"
+
+
+def test_format_body_passes_through_unknown_type() -> None:
+    assert _format_body("plain text here", "text/plain") == "plain text here"
+
+
+def test_format_body_returns_none_for_empty() -> None:
+    assert _format_body(None, "application/json") is None
+
+
+def test_detail_body_formats_ndjson_stream(tmp_path: Path) -> None:
+    db = tmp_path / "ndjson.db"
+    with Store(db) as s:
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:00",
+                tool="Cursor",
+                method="POST",
+                scheme="https",
+                host="api.cursor.sh",
+                path="/v1/chat",
+                req_bytes=20,
+                resp_bytes=100,
+                status=200,
+                headers_json='{"content-type": "application/x-ndjson"}',
+                body_excerpt='{"a":1}\n{"b":2}',
+                body_hash="abc",
+                redactions_applied_json=None,
+                enforcement=None,
+            )
+        )
+    with TestClient(create_app(db)) as c:
+        response = c.get("/requests/1?tab=body")
+
+    assert "&#34;a&#34;: 1" in response.text
+
+
+def test_detail_body_formats_form_encoded(tmp_path: Path) -> None:
+    db = tmp_path / "form.db"
+    with Store(db) as s:
+        s.insert_request(
+            RequestRecord(
+                ts="2026-05-20T09:00:00",
+                tool="Cursor",
+                method="POST",
+                scheme="https",
+                host="api.cursor.sh",
+                path="/v1/chat",
+                req_bytes=30,
+                resp_bytes=100,
+                status=200,
+                headers_json='{"content-type": "application/x-www-form-urlencoded"}',
+                body_excerpt="model=claude&max_tokens=100",
+                body_hash="abc",
+                redactions_applied_json=None,
+                enforcement=None,
+            )
+        )
+    with TestClient(create_app(db)) as c:
+        response = c.get("/requests/1?tab=body")
+
+    assert "max_tokens = 100" in response.text
