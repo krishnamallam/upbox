@@ -565,3 +565,55 @@ def test_detail_body_formats_form_encoded(tmp_path: Path) -> None:
         response = c.get("/requests/1?tab=body")
 
     assert "max_tokens = 100" in response.text
+
+
+def test_format_body_form_does_not_amplify_output() -> None:
+    # One very long key must not pad every other line up to its width.
+    body = "&".join(["k" * 20_000 + "=v"] + [f"a{i}=1" for i in range(2_000)])
+
+    out = _format_body(body, "application/x-www-form-urlencoded")
+
+    assert out is not None and len(out) < 10 * len(body)
+
+
+def test_format_body_coerces_non_string_content_type() -> None:
+    # A malformed (list-valued) content-type must not raise a 500.
+    assert _format_body("a=1&b=2", ["application/x-www-form-urlencoded"]) == "a=1&b=2"
+
+
+def test_format_body_form_falls_back_when_a_segment_is_not_a_pair() -> None:
+    assert _format_body("a=1&plain prose", "application/x-www-form-urlencoded") == "a=1&plain prose"
+
+
+def test_format_body_form_shows_raw_undecoded_values() -> None:
+    assert _format_body("q=hi%20there", "application/x-www-form-urlencoded") == "q = hi%20there"
+
+
+def test_format_body_indents_single_json_even_when_typed_event_stream() -> None:
+    assert _format_body('{"x":1}', "text/event-stream") == '{\n  "x": 1\n}'
+
+
+def test_format_body_strips_charset_parameter_from_content_type() -> None:
+    result = _format_body("a=1&b=2", "application/x-www-form-urlencoded; charset=utf-8")
+    assert result == "a = 1\nb = 2"
+
+
+def test_format_body_sse_falls_back_to_verbatim_when_no_data_line_is_json() -> None:
+    assert (
+        _format_body("data: hello\ndata: world", "text/event-stream") == "data: hello\ndata: world"
+    )
+
+
+def test_format_body_ndjson_skips_blank_and_trailing_lines() -> None:
+    result = _format_body('{"a":1}\n\n{"b":2}\n', "application/x-ndjson")
+    assert result == '{\n  "a": 1\n}\n\n{\n  "b": 2\n}'
+
+
+def test_format_body_form_aligns_unequal_key_widths() -> None:
+    result = _format_body("model=claude&max_tokens=100", "application/x-www-form-urlencoded")
+    assert result == f"{'model'.ljust(10)} = claude\nmax_tokens = 100"
+
+
+def test_format_body_ndjson_handles_crlf_line_endings() -> None:
+    result = _format_body('{"a":1}\r\n{"b":2}', "application/x-ndjson")
+    assert result == '{\n  "a": 1\n}\n\n{\n  "b": 2\n}'

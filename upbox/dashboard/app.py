@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.parse
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -125,11 +124,16 @@ def _format_body(value: str | None, content_type: str | None = None) -> str | No
     well). Otherwise we branch on ``Content-Type`` for structured-but-not-single
     JSON bodies: NDJSON, SSE event streams, and form-encoded. Each formatter
     falls back to the raw text if it can't cleanly format, so the Body tab never
-    shows worse than the verbatim excerpt and never raises. The caller still
-    HTML-escapes and highlights redaction markers afterwards.
+    shows worse than the verbatim excerpt and never raises. Output is unescaped
+    plain text and MUST be rendered through the ``redact_marks`` filter, which
+    HTML-escapes it and highlights ``[REDACTED:...]`` markers.
     """
     if not value:
         return value
+    # content_type comes from stored headers and may be malformed (e.g. a list);
+    # only a real string drives formatting, everything else falls through.
+    if not isinstance(content_type, str):
+        content_type = None
     pretty = _pretty_json(value)
     if pretty != value:
         return pretty
@@ -146,7 +150,7 @@ def _format_body(value: str | None, content_type: str | None = None) -> str | No
 def _format_ndjson(value: str) -> str | None:
     """Indent each line of an NDJSON / JSONL body. Returns None unless every
     non-empty line is valid JSON (otherwise the caller keeps the raw text)."""
-    lines = [line for line in value.splitlines() if line.strip()]
+    lines = [line.rstrip("\r") for line in value.split("\n") if line.strip()]
     if not lines:
         return None
     out: list[str] = []
@@ -164,7 +168,8 @@ def _format_sse(value: str) -> str | None:
     lines are kept as-is. Returns None if no data line carried JSON."""
     formatted_any = False
     out: list[str] = []
-    for line in value.splitlines():
+    for raw_line in value.split("\n"):
+        line = raw_line.rstrip("\r")
         stripped = line.strip()
         if stripped.startswith("data:"):
             payload = stripped[len("data:") :].strip()
@@ -181,14 +186,21 @@ def _format_sse(value: str) -> str | None:
 
 
 def _format_form(value: str) -> str | None:
-    """Render a urlencoded body as ``key = value`` lines aligned on ``=``.
-    Returns None for text without ``=`` so plain prose isn't mangled."""
-    if "=" not in value:
-        return None
-    pairs = urllib.parse.parse_qsl(value, keep_blank_values=True)
-    if not pairs:
-        return None
-    width = max(len(key) for key, _ in pairs)
+    """Render a urlencoded body as ``key = value`` lines, one per ``&`` segment.
+
+    Shows the raw (still-encoded) key/value so the audit view reflects exactly
+    what was sent, not a decoded interpretation. Returns None unless every
+    segment is a real ``key=value`` pair, so prose or partial bodies fall back
+    to verbatim. The alignment column is capped so one very long key can't pad
+    every other line and balloon the rendered size.
+    """
+    pairs: list[tuple[str, str]] = []
+    for segment in value.split("&"):
+        if "=" not in segment:
+            return None
+        key, val = segment.split("=", 1)
+        pairs.append((key, val))
+    width = min(max(len(key) for key, _ in pairs), 40)
     return "\n".join(f"{key.ljust(width)} = {val}" for key, val in pairs)
 
 
