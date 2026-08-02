@@ -332,26 +332,37 @@ def checkpoint(
 
 @app.command()
 def export(
-    fmt: str = typer.Option("jsonl", "--format", help="jsonl or csv."),
+    fmt: str = typer.Option("jsonl", "--format", help="audit, jsonl, or csv."),
     output: str = typer.Option("-", "-o", help="Output path; - for stdout."),
     since: str = typer.Option("", help="Only rows with ts >= this ISO timestamp."),
     until: str = typer.Option("", help="Only rows with ts <= this ISO timestamp."),
     tool: str = typer.Option("", help="Only rows for this tool name."),
 ) -> None:
-    """Export the audit log to JSON Lines or CSV."""
+    """Export the audit log.
+
+    ``audit`` writes upbox.audit.v1: newline-delimited JSON carrying the ruleset
+    digests, the hash-chain verification result, and an explicit coverage
+    statement, so the file stands on its own. ``jsonl`` and ``csv`` are the flat
+    v0.1 dumps, kept for spreadsheets and existing scripts.
+    """
     import sqlite3
     import sys
     from collections.abc import Iterable
     from pathlib import Path
     from typing import IO
 
+    from upbox.audit_export import write_audit_v1
     from upbox.db.store import Store
 
-    if fmt not in {"jsonl", "csv"}:
-        typer.echo(f"unknown format: {fmt!r} (expected jsonl or csv)", err=True)
+    if fmt not in {"audit", "jsonl", "csv"}:
+        typer.echo(f"unknown format: {fmt!r} (expected audit, jsonl, or csv)", err=True)
         raise typer.Exit(code=2)
 
     def _write(sink: IO[str], rows: Iterable[sqlite3.Row]) -> int:
+        if fmt == "audit":
+            return write_audit_v1(
+                store, sink, since=since or None, until=until or None, tool=tool or None
+            )
         if fmt == "jsonl":
             return store.export_jsonl(sink, rows)
         return store.export_csv(sink, rows)
