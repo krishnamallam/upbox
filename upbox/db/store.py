@@ -154,17 +154,33 @@ class Store:
         self.path = resolved
         self._read_only = read_only
         resolved.parent.mkdir(parents=True, exist_ok=True)
+        # Before connect: connecting creates the file.
+        already_existed = resolved.exists()
         self._conn = sqlite3.connect(resolved, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        if read_only:
+            # A reader must not migrate an existing database. Doing that (as
+            # this once did) made the dashboard a second writer against a chain
+            # that is only sound with one, and put a schema upgrade of real user
+            # data in the process least equipped to perform it.
+            #
+            # Creating an absent one is a different thing: there is no user data
+            # to upgrade and no other writer yet, and without it a dashboard
+            # started before the proxy on a fresh machine fails every query with
+            # "no such table: requests".
+            if not already_existed:
+                self._init_schema()
+                self._migrate()
+                self._enable_wal()
+            self._conn.execute("PRAGMA query_only = 1")
+            harden_path_permissions(resolved)
+            return
         self._init_schema()
         self._migrate()
         self._enable_wal()
         # After WAL: enabling it creates the -wal and -shm files, which hold
         # recently written rows and need the same mode as the database.
         harden_path_permissions(resolved)
-        if read_only:
-            # Set last: schema init and migration both need to write.
-            self._conn.execute("PRAGMA query_only = 1")
 
     def _init_schema(self) -> None:
         schema = resources.files("upbox.db").joinpath("schema.sql").read_text()
@@ -361,6 +377,51 @@ class Store:
         ).fetchone()
         return cast("sqlite3.Row", row)
 
+    def preview_prune(self, policy: RetentionPolicy, now: datetime | None = None) -> PruneResult:
+        """Count what ``prune`` would remove, changing nothing."""
+        moment = now if now is not None else datetime.now(UTC)
+        body_cutoff = policy.body_cutoff(moment)
+        record_cutoff = policy.record_cutoff(moment)
+
+        bodies = 0
+        if body_cutoff is not None:
+            bodies = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM requests "
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    (body_cutoff.isoformat(),),
+                ).fetchone()[0]
+            )
+
+        records = 0
+        first: int | None = None
+        last: int | None = None
+        if record_cutoff is not None:
+            records = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM requests WHERE seq IS NULL AND ts < ? AND legal_hold = 0",
+                    (record_cutoff.isoformat(),),
+                ).fetchone()[0]
+            )
+            # Mirrors _delete_records_before: only the contiguous run from the
+            # oldest chained entry is deletable, and a legal hold stops it.
+            for row in self._conn.execute(
+                "SELECT seq, legal_hold, ts FROM requests WHERE seq IS NOT NULL ORDER BY seq"
+            ):
+                if row["legal_hold"] or row["ts"] >= record_cutoff.isoformat():
+                    break
+                if first is None:
+                    first = int(row["seq"])
+                last = int(row["seq"])
+                records += 1
+
+        return PruneResult(
+            bodies_cleared=bodies,
+            records_deleted=records,
+            gap_seq_start=first,
+            gap_seq_end=last,
+        )
+
     def prune(self, policy: RetentionPolicy, now: datetime | None = None) -> PruneResult:
         """Apply a retention policy. Returns what it did without printing.
 
@@ -390,8 +451,17 @@ class Store:
                 bodies_cleared = cursor.rowcount
 
             if record_cutoff is not None:
+                # Unchained rows first. They predate v0.2, so they are the
+                # oldest rows in the database and the ones still holding
+                # credentials from the header-storage bug. Excluding them from
+                # retention, as this once did, meant the data most in need of
+                # deletion was the only data kept forever. They carry no seq, so
+                # removing them leaves no gap and needs no gap record.
+                unchained_deleted = self._delete_unchained_before(record_cutoff)
                 gap = self._delete_records_before(record_cutoff, stamp)
-                records_deleted = int(gap["entry_count"]) if gap is not None else 0
+                records_deleted = unchained_deleted + (
+                    int(gap["entry_count"]) if gap is not None else 0
+                )
 
         return PruneResult(
             bodies_cleared=bodies_cleared,
@@ -399,6 +469,18 @@ class Store:
             gap_seq_start=int(gap["seq_start"]) if gap is not None else None,
             gap_seq_end=int(gap["seq_end"]) if gap is not None else None,
         )
+
+    def _delete_unchained_before(self, cutoff: datetime) -> int:
+        """Delete pre-v0.2 rows older than ``cutoff``. Returns rows removed.
+
+        These sit outside the chain, so there is nothing to link across and no
+        gap record to write. Legal holds still apply.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM requests WHERE seq IS NULL AND ts < ? AND legal_hold = 0",
+            (cutoff.isoformat(),),
+        )
+        return cursor.rowcount
 
     def _delete_records_before(self, cutoff: datetime, stamp: str) -> sqlite3.Row | None:
         """Delete chained rows older than ``cutoff`` and record the gap.
@@ -485,7 +567,7 @@ class Store:
         first_seq: int | None = None
         last_seq: int | None = None
 
-        def broken(seq: int, detail: str) -> ChainVerification:
+        def broken(seq: int | None, detail: str) -> ChainVerification:
             return ChainVerification(
                 status="broken",
                 checked=checked,
@@ -499,22 +581,40 @@ class Store:
                 entries_deleted=entries_deleted,
             )
 
+        def skip_recorded_gaps(stop_at: int | None) -> str | None:
+            """Advance across recorded retention gaps. Returns a reason on failure.
+
+            A gap is only acceptable where a retention deletion recorded both its
+            range and the hash of the last entry it removed, which is what lets
+            linkage resume. An unrecorded gap is tampering.
+
+            Successive retention passes leave adjacent gaps (1-2, then 3-4), so
+            this consumes as many as line up rather than one per row. A row with
+            ``seq_end < seq_start`` would make ``expected_seq`` cycle forever, so
+            it is rejected outright: nothing legitimate writes one, and a forged
+            one must not be able to hang the verifier instead of failing it.
+            """
+            nonlocal expected_prev, expected_seq, entries_deleted
+            while expected_seq in gaps and expected_seq != stop_at:
+                gap = gaps[expected_seq]
+                end = int(gap["seq_end"])
+                if end < expected_seq:
+                    return f"malformed retention gap record at seq {expected_seq}"
+                expected_prev = str(gap["last_entry_hash"])
+                # Derived from the range, not read from entry_count: a forged
+                # count would otherwise inflate what the export discloses.
+                entries_deleted += end - expected_seq + 1
+                expected_seq = end + 1
+            return None
+
         for row in rows:
             seq = int(row["seq"])
             if first_seq is None:
                 first_seq = seq
-            # A gap is only acceptable where a retention deletion recorded both
-            # its range and the hash of the last entry it removed, which is what
-            # lets linkage resume. An unrecorded gap is tampering.
-            # A while loop, not an if: successive retention passes leave
-            # adjacent gaps (1-2, then 3-4), and each has to be consumed in
-            # turn or the second one reads as tampering. Terminates because
-            # seq_end >= seq_start, so expected_seq strictly increases.
-            while seq != expected_seq and expected_seq in gaps:
-                gap = gaps[expected_seq]
-                expected_prev = str(gap["last_entry_hash"])
-                entries_deleted += int(gap["entry_count"])
-                expected_seq = int(gap["seq_end"]) + 1
+            if seq != expected_seq:
+                failure = skip_recorded_gaps(seq)
+                if failure is not None:
+                    return broken(seq, failure)
             if seq != expected_seq:
                 return broken(seq, f"sequence gap: expected seq {expected_seq}, found {seq}")
             if row["prev_hash"] != expected_prev:
@@ -544,6 +644,24 @@ class Store:
             last_seq = seq
             checked += 1
 
+        # Trailing gaps, including the case where retention removed every entry.
+        # This must run before the stored-head comparison below, or a full prune
+        # looks like a head that disagrees with the log.
+        failure = skip_recorded_gaps(None)
+        if failure is not None:
+            return broken(last_seq, failure)
+
+        stored_head = self.head_hash()
+        if stored_head != expected_prev:
+            # Reached with checked == 0 when every chained row was deleted
+            # without a covering gap record. Returning "empty" here (as this
+            # once did) reported a wiped log as a fresh one, which is the
+            # easiest possible attack and the one the chain exists to catch.
+            return broken(
+                last_seq,
+                "stored chain head does not match the end of the log (entries removed?)",
+            )
+
         if checked == 0:
             return ChainVerification(
                 status="empty",
@@ -551,15 +669,8 @@ class Store:
                 unchained=unchained,
                 first_seq=None,
                 last_seq=None,
-                head_hash=self.head_hash(),
-            )
-
-        stored_head = self.head_hash()
-        if stored_head != expected_prev:
-            assert last_seq is not None
-            return broken(
-                last_seq,
-                "stored chain head does not match the end of the log (entries removed?)",
+                head_hash=stored_head,
+                entries_deleted=entries_deleted,
             )
 
         return ChainVerification(

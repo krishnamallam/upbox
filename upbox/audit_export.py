@@ -34,7 +34,7 @@ from typing import IO, Any
 from upbox import __version__
 from upbox.addons import enforce, fingerprint, redact
 from upbox.db import chain
-from upbox.db.store import Store
+from upbox.db.store import BODY_EXCERPT_MAX, Store
 
 SCHEMA = "upbox.audit.v1"
 
@@ -186,11 +186,16 @@ def _record(row: Any) -> dict[str, Any]:
         record[name] = row[name]
 
     # Truncation is stated, not left for the reader to infer from a length.
+    # Three states, not two: a body cleared by retention is not an untruncated
+    # body, and reporting false for it would assert something never checked.
+    # The comparison is against BODY_EXCERPT_MAX rather than the excerpt's own
+    # length, because a non-UTF-8 body decodes with replacement characters that
+    # can be longer than the bytes they stand in for.
     req_bytes = row["req_bytes"]
-    excerpt = row["body_excerpt"]
-    record["body_truncated"] = bool(
-        req_bytes is not None and excerpt is not None and req_bytes > len(excerpt.encode("utf-8"))
-    )
+    if row["body_excerpt"] is None:
+        record["body_truncated"] = None if row["body_excerpt_sha256"] is not None else False
+    else:
+        record["body_truncated"] = bool(req_bytes is not None and req_bytes > BODY_EXCERPT_MAX)
     record["redactions"] = json.loads(row["redactions_applied_json"] or "null")
     # 'flagged' reached the cloud. A reader scanning a column of statuses will
     # assume otherwise unless it is spelled out per record.

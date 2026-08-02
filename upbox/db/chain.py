@@ -8,7 +8,7 @@ reordering after the fact.
 The chain covers *hashes of* ``headers_json`` and ``body_excerpt`` rather than
 their contents. That is deliberate: retention can null out the stored text
 later and the chain still verifies, because the hash that was chained survives
-in its own column. See ``docs/hash-chain.md``.
+in its own column. See the "Tamper evidence" section of the README.
 
 What this does not do
 ---------------------

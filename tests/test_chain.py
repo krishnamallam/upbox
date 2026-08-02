@@ -376,6 +376,75 @@ def test_untouched_chain_reports_no_unavailable_content(tmp_store: Store) -> Non
     assert tmp_store.verify_chain().content_unavailable == 0
 
 
+# --- regressions from the v0.2 adversarial review --------------------------
+
+
+def test_wiping_every_row_is_tampering_not_an_empty_log(tmp_store: Store) -> None:
+    """The easiest attack there is. This once reported 'empty' and exited 0."""
+    for _ in range(5):
+        tmp_store.insert_request(_make_record())
+
+    tmp_store._conn.execute("DELETE FROM requests")
+
+    assert tmp_store.verify_chain().status == "broken"
+
+
+def test_a_genuinely_fresh_database_is_still_empty(tmp_store: Store) -> None:
+    """The counterpart: no rows and a genesis head is not tampering."""
+    assert tmp_store.verify_chain().status == "empty"
+
+
+def test_a_backwards_gap_record_fails_instead_of_hanging(tmp_store: Store) -> None:
+    """seq_end < seq_start made expected_seq cycle, wedging verify forever."""
+    for _ in range(5):
+        tmp_store.insert_request(_make_record())
+    tmp_store._conn.execute("DELETE FROM requests WHERE seq BETWEEN 1 AND 3")
+    tmp_store._conn.execute(
+        "INSERT INTO chain_gaps (ts, seq_start, seq_end, entry_count, last_entry_hash, reason) "
+        "VALUES ('2026-08-02T00:00:00', 1, 0, 1, 'deadbeef', 'forged')"
+    )
+
+    assert tmp_store.verify_chain().status == "broken"
+
+
+def test_gap_entry_count_is_derived_not_trusted(tmp_store: Store) -> None:
+    """A forged count must not inflate what the export discloses."""
+    for _ in range(5):
+        tmp_store.insert_request(_make_record())
+    third = tmp_store.query_filtered()[2]
+    tmp_store._conn.execute("DELETE FROM requests WHERE seq BETWEEN 1 AND 3")
+    tmp_store._conn.execute(
+        "INSERT INTO chain_gaps (ts, seq_start, seq_end, entry_count, last_entry_hash, reason) "
+        "VALUES ('2026-08-02T00:00:00', 1, 3, 9999, ?, 'retention')",
+        (third["entry_hash"],),
+    )
+
+    assert tmp_store.verify_chain().entries_deleted == 3
+
+
+def test_read_only_store_does_not_migrate_an_existing_database(tmp_path: Path) -> None:
+    """The dashboard must never upgrade the schema of real user data."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    legacy = sqlite3.connect(path)
+    legacy.execute("CREATE TABLE requests (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, host TEXT)")
+    legacy.commit()
+    legacy.close()
+
+    Store(path, read_only=True).close()
+    columns = {row[1] for row in sqlite3.connect(path).execute("PRAGMA table_info(requests)")}
+
+    assert "seq" not in columns
+
+
+def test_read_only_store_creates_an_absent_database(tmp_path: Path) -> None:
+    """A dashboard started before the proxy must still serve an empty feed."""
+    store = Store(tmp_path / "brand-new.db", read_only=True)
+
+    assert store.query_recent() == []
+
+
 def test_redactions_column_is_chained(tmp_store: Store) -> None:
     tmp_store.insert_request(_make_record(redactions_applied_json=json.dumps(["openai-key"])))
     tmp_store._conn.execute("UPDATE requests SET redactions_applied_json = '[]' WHERE seq = 1")

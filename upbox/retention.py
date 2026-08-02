@@ -171,16 +171,21 @@ class RetentionRunner:
             for note in policy.warnings():
                 log.warning("retention: %s", note)
             result = self._store.prune(policy)
+            if result.bodies_cleared or result.records_deleted:
+                log.info(
+                    "retention: cleared %d body/header set(s), deleted %d row(s)",
+                    result.bodies_cleared,
+                    result.records_deleted,
+                )
+                # Inside the try: a checkpoint failure used to escape run_once,
+                # kill the asyncio task, and silently disable retention for the
+                # lifetime of the proxy.
+                self._store.write_checkpoint("prune")
         except Exception:
-            log.exception("retention pass failed; the audit log is unchanged")
-            return
-        if result.bodies_cleared or result.records_deleted:
-            log.info(
-                "retention: cleared %d body/header set(s), deleted %d row(s)",
-                result.bodies_cleared,
-                result.records_deleted,
-            )
-            self._store.write_checkpoint("prune")
+            # Deliberately not claiming the log is unchanged: prune is
+            # transactional, but a failure in the checkpoint after it commits
+            # leaves real deletions on disk with no sealed head.
+            log.exception("retention pass failed; run `upbox verify` to check the log state")
 
     @staticmethod
     def _on_done(task: asyncio.Task[None]) -> None:

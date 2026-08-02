@@ -346,6 +346,110 @@ def test_runner_swallows_failures_to_keep_the_proxy_up(
     assert tmp_store.verify_chain().status == "empty"
 
 
+# --- regressions from the v0.2 adversarial review --------------------------
+
+
+def _insert_unchained(store: Store, ts: datetime) -> None:
+    """A row as v0.1 would have written it: no seq, outside the chain."""
+    store._conn.execute(
+        "INSERT INTO requests (ts, host, method) VALUES (?, 'old.example', 'GET')",
+        (ts.isoformat(),),
+    )
+
+
+def test_record_retention_deletes_pre_v02_rows(tmp_store: Store) -> None:
+    """These are the oldest rows and the ones holding pre-fix credentials."""
+    _insert_unchained(tmp_store, NOW - timedelta(days=500))
+
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert len(tmp_store.query_filtered()) == 0
+
+
+def test_record_retention_counts_deleted_pre_v02_rows(tmp_store: Store) -> None:
+    _insert_unchained(tmp_store, NOW - timedelta(days=500))
+
+    result = tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert result.records_deleted == 1
+
+
+def test_recent_pre_v02_rows_are_kept(tmp_store: Store) -> None:
+    _insert_unchained(tmp_store, NOW - timedelta(days=10))
+
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert len(tmp_store.query_filtered()) == 1
+
+
+def test_legal_hold_protects_a_pre_v02_row(tmp_store: Store) -> None:
+    _insert_unchained(tmp_store, NOW - timedelta(days=500))
+    tmp_store.set_legal_hold()
+
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert len(tmp_store.query_filtered()) == 1
+
+
+def test_full_retention_prune_reports_what_it_deleted(tmp_store: Store) -> None:
+    """This reported entries_deleted=0 into the auditor-facing export header."""
+    _seed(tmp_store, [500, 450])
+
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert tmp_store.verify_chain().entries_deleted == 2
+
+
+def test_dry_run_counts_bodies_it_would_clear(tmp_store: Store) -> None:
+    _seed(tmp_store, [30, 1])
+
+    assert tmp_store.preview_prune(RetentionPolicy(body_days=7), now=NOW).bodies_cleared == 1
+
+
+def test_dry_run_counts_records_it_would_delete(tmp_store: Store) -> None:
+    _seed(tmp_store, [500, 10])
+
+    preview = tmp_store.preview_prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    assert preview.records_deleted == 1
+
+
+def test_dry_run_changes_nothing(tmp_store: Store) -> None:
+    _seed(tmp_store, [500])
+
+    tmp_store.preview_prune(RetentionPolicy(body_days=7, record_days=400), now=NOW)
+
+    assert tmp_store.query_recent()[0]["body_excerpt"] is not None
+
+
+def test_dry_run_matches_what_prune_then_does(tmp_store: Store) -> None:
+    _seed(tmp_store, [500, 450, 30, 1])
+    policy = RetentionPolicy(body_days=7, record_days=400)
+    preview = tmp_store.preview_prune(policy, now=NOW)
+
+    actual = tmp_store.prune(policy, now=NOW)
+
+    assert (preview.bodies_cleared, preview.records_deleted) == (
+        actual.bodies_cleared,
+        actual.records_deleted,
+    )
+
+
+def test_runner_survives_a_checkpoint_failure(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raise here used to kill the asyncio task and disable retention."""
+    _seed(tmp_store, [30])
+    monkeypatch.setattr("upbox.retention.load_policy", lambda: RetentionPolicy(body_days=7))
+    monkeypatch.setattr(
+        tmp_store, "write_checkpoint", lambda reason: (_ for _ in ()).throw(RuntimeError("disk"))
+    )
+
+    RetentionRunner(tmp_store).run_once()  # must not raise
+
+    assert tmp_store.query_recent()[0]["body_excerpt"] is None
+
+
 def test_a_held_row_stops_the_deletion_run(tmp_store: Store) -> None:
     """Pruning around a hold would punch a second gap needing its own record."""
     _seed(tmp_store, [500, 450, 440])

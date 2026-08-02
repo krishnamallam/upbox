@@ -46,6 +46,57 @@ SENSITIVE_HEADERS = frozenset(
 
 HEADER_REDACTION_MARKER = "[REDACTED:header]"
 
+# Query parameters that carry credentials. Google, and plenty of smaller APIs,
+# accept the key in the URL, and mitmproxy's ``request.path`` includes the query
+# string. Storing it verbatim is the same defect as the header one, and worse in
+# one respect: ``path`` is chained directly rather than via a digest, so
+# retention cannot clear it later without breaking verification. It has to be
+# kept out at capture time or not at all.
+SENSITIVE_QUERY_PARAMS = frozenset(
+    {
+        "key",
+        "api_key",
+        "apikey",
+        "access_token",
+        "token",
+        "auth",
+        "auth_token",
+        "session",
+        "sig",
+        "signature",
+        "password",
+        "secret",
+        "client_secret",
+        "refresh_token",
+        "id_token",
+    }
+)
+
+QUERY_REDACTION_MARKER = "[REDACTED:query]"
+
+
+def redact_query_string(path: str) -> str:
+    """Replace credential-bearing query parameter values with a marker.
+
+    Keeps the parameter name and position so the path stays recognisable and an
+    auditor can still see that a key was passed in the URL. Anything upbox
+    cannot parse is returned unchanged rather than guessed at.
+    """
+    head, sep, query = path.partition("?")
+    if not sep or not query:
+        return path
+    # Split manually rather than via parse_qsl: that drops empty values,
+    # collapses separators, and unquotes, all of which would silently rewrite a
+    # path that gets hashed into the chain.
+    parts: list[str] = []
+    for pair in query.split("&"):
+        name, eq, _value = pair.partition("=")
+        if eq and name.lower() in SENSITIVE_QUERY_PARAMS:
+            parts.append(f"{name}={QUERY_REDACTION_MARKER}")
+        else:
+            parts.append(pair)
+    return f"{head}?{'&'.join(parts)}"
+
 
 def redact_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
     """Replace auth-bearing header values with a marker, keeping the names.
@@ -85,7 +136,7 @@ class CaptureAddon:
             method=req.method,
             scheme=req.scheme,
             host=resolve_host(flow),
-            path=req.path,
+            path=redact_query_string(req.path),
             req_bytes=len(body),
             resp_bytes=len(resp.content) if resp and resp.content else None,
             status=resp.status_code if resp else None,

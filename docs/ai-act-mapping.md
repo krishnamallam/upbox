@@ -106,7 +106,12 @@ The audit log table (`requests` in `~/.upbox/upbox.db`) records:
 
 `flagged` requests reached the cloud. Only `blocked` ones did not.
 
-Export with `upbox export --format jsonl|csv [--since TS --until TS --tool NAME]`.
+Export with `upbox export --format audit|jsonl|csv [--since TS --until TS --tool NAME]`.
+
+`audit` writes `upbox.audit.v1`, which carries the ruleset digests, the
+hash-chain verification result, what retention removed, and a coverage
+statement, so the file can be handed to an auditor without a covering note.
+`jsonl` and `csv` are flat dumps for spreadsheets and scripts.
 
 ### Article 99: penalties
 

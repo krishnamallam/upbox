@@ -229,7 +229,8 @@ def verify() -> None:
     elif result.status == "ok":
         typer.echo(f"Chain OK: {result.checked} entries, seq {result.first_seq}-{result.last_seq}.")
     else:
-        typer.echo(f"Chain BROKEN at seq {result.broken_at}: {result.detail}", err=True)
+        where = f" at seq {result.broken_at}" if result.broken_at is not None else ""
+        typer.echo(f"Chain BROKEN{where}: {result.detail}", err=True)
         typer.echo(f"Verified {result.checked} entries before the break.", err=True)
 
     if result.unchained:
@@ -323,6 +324,19 @@ def prune(
         typer.echo(f"warning: {note}", err=True)
 
     if dry_run:
+        with Store() as store:
+            preview = store.preview_prune(policy)
+        typer.echo(f"Would clear bodies on {preview.bodies_cleared} row(s).")
+        if preview.records_deleted:
+            typer.echo(
+                f"Would delete {preview.records_deleted} row(s)"
+                + (
+                    f", chained seq {preview.gap_seq_start}-{preview.gap_seq_end}"
+                    if preview.gap_seq_start is not None
+                    else ""
+                )
+                + "."
+            )
         typer.echo("--dry-run: nothing was changed.")
         return
 
@@ -348,10 +362,35 @@ def hold(
     """Exempt a time range from retention, for a live dispute or investigation."""
     from upbox.db.store import Store
 
+    # Bounds are compared as strings against stored ISO timestamps, so a
+    # date-only bound like "2026-07-01" silently excludes every row from that
+    # same day (their "2026-07-01T09:00:00" sorts after it). Normalise instead
+    # of holding the wrong rows in a dispute.
+    since_ts = _normalise_bound(since, end_of_day=False)
+    until_ts = _normalise_bound(until, end_of_day=True)
+
     with Store() as store:
-        affected = store.set_legal_hold(since or None, until or None, held=not release)
+        affected = store.set_legal_hold(since_ts, until_ts, held=not release)
     verb = "released" if release else "held"
     typer.echo(f"{verb} {affected} row(s).")
+
+
+def _normalise_bound(value: str, *, end_of_day: bool) -> str | None:
+    """Validate an ISO timestamp bound, widening a bare date to cover the day."""
+    if not value:
+        return None
+    from datetime import date, datetime
+
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            typer.echo(f"not an ISO date or timestamp: {value!r}", err=True)
+            raise typer.Exit(code=2) from None
+        return f"{value}T23:59:59.999999" if end_of_day else f"{value}T00:00:00"
+    return value
 
 
 @app.command()

@@ -187,6 +187,37 @@ def test_capture_keeps_the_redacted_header_name(store: Store) -> None:
     assert "Authorization" in headers
 
 
+def test_capture_redacts_a_key_in_the_query_string(store: Store) -> None:
+    """path is chained directly, so retention can never clear a key stored here."""
+    CaptureAddon(store).response(_flow(path="/v1/models?key=AIzaSyRealSecretKey"))
+
+    assert "AIzaSyRealSecretKey" not in store.query_recent()[0]["path"]
+
+
+def test_capture_keeps_the_query_parameter_name(store: Store) -> None:
+    CaptureAddon(store).response(_flow(path="/v1/models?key=AIzaSyRealSecretKey"))
+
+    assert store.query_recent()[0]["path"] == "/v1/models?key=[REDACTED:query]"
+
+
+def test_capture_keeps_ordinary_query_parameters(store: Store) -> None:
+    CaptureAddon(store).response(_flow(path="/v1/models?limit=10"))
+
+    assert store.query_recent()[0]["path"] == "/v1/models?limit=10"
+
+
+def test_capture_redacts_only_the_sensitive_parameter(store: Store) -> None:
+    CaptureAddon(store).response(_flow(path="/v1/m?limit=10&access_token=abc&page=2"))
+
+    assert store.query_recent()[0]["path"] == "/v1/m?limit=10&access_token=[REDACTED:query]&page=2"
+
+
+def test_capture_leaves_a_pathless_query_alone(store: Store) -> None:
+    CaptureAddon(store).response(_flow(path="/v1/messages"))
+
+    assert store.query_recent()[0]["path"] == "/v1/messages"
+
+
 def test_header_redaction_is_not_reported_as_a_body_redaction(store: Store) -> None:
     """Header values are still forwarded. Only storage changes, so claiming a
     redaction fired would imply the credential never left the machine."""
