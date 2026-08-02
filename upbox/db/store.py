@@ -16,11 +16,30 @@ import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
+from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 from typing import IO, Any, cast
 
+from upbox.db import chain
+
 DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
+
+# Bumped whenever _migrate gains a step. Fresh databases are created at the
+# final shape by schema.sql and then run every migration anyway; each one is
+# guarded so it is a no-op on an already-correct schema.
+SCHEMA_VERSION = 2
+
+# Columns added by the v2 hash-chain migration, with their affinities. seq must
+# be INTEGER: under TEXT affinity SQLite would store 10 as '10' and order it
+# before 9.
+_V2_CHAIN_COLUMNS = {
+    "seq": "INTEGER",
+    "prev_hash": "TEXT",
+    "entry_hash": "TEXT",
+    "headers_sha256": "TEXT",
+    "body_excerpt_sha256": "TEXT",
+}
 # Cap stored request bodies at 100 KB. The proxy still forwards the full body;
 # this only bounds what lands in the audit DB. ``body_hash`` covers the whole
 # body for integrity, ``req_bytes`` records the true size. Bigger than the old
@@ -61,42 +80,117 @@ class RequestRecord:
 
 _INSERT_COLUMNS = (
     "ts, tool, method, scheme, host, path, req_bytes, resp_bytes, status, "
-    "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement"
+    "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement, "
+    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256"
 )
-_INSERT_PLACEHOLDERS = ", ".join("?" * 14)
+_INSERT_PLACEHOLDERS = ", ".join("?" * 19)
+
+
+class ReadOnlyStoreError(RuntimeError):
+    """Raised when a write is attempted on a store opened read-only."""
+
+
+@dataclass(frozen=True)
+class ChainVerification:
+    """Outcome of verifying the hash chain.
+
+    ``status`` is ``ok``, ``broken``, or ``empty``. ``unchained`` counts rows
+    written before v0.2, which carry no ``seq`` and are outside the chain: they
+    are not a failure, but an export must disclose them.
+    """
+
+    status: str
+    checked: int
+    unchained: int
+    first_seq: int | None
+    last_seq: int | None
+    head_hash: str
+    broken_at: int | None = None
+    detail: str | None = None
+    # Entries whose text columns were cleared by retention. Their digests are
+    # still chained, so the chain verifies, but the content behind those
+    # digests can no longer be checked and the count must be disclosed.
+    content_unavailable: int = 0
 
 
 class Store:
-    """SQLite audit-log store. Open is idempotent."""
+    """SQLite audit-log store. Open is idempotent.
 
-    def __init__(self, path: Path | None = None) -> None:
+    Pass ``read_only=True`` for reader processes (the dashboard). The hash
+    chain is only sound with a single writer, and a stray write from a second
+    process produces a break indistinguishable from tampering.
+    """
+
+    def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
         # Resolve at call time so tests can monkeypatch DEFAULT_DB_PATH.
         resolved = path if path is not None else DEFAULT_DB_PATH
         self.path = resolved
+        self._read_only = read_only
         resolved.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(resolved, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
-        self._migrate_enforcement_column()
+        self._migrate()
         self._enable_wal()
+        if read_only:
+            # Set last: schema init and migration both need to write.
+            self._conn.execute("PRAGMA query_only = 1")
 
     def _init_schema(self) -> None:
         schema = resources.files("upbox.db").joinpath("schema.sql").read_text()
         self._conn.executescript(schema)
 
-    def _migrate_enforcement_column(self) -> None:
+    def _migrate(self) -> None:
+        """Bring an existing database to ``SCHEMA_VERSION``.
+
+        A fresh database is already at the final shape, but reports version 0
+        (no ``schema_version`` row) and runs every step. Each step is therefore
+        guarded so it is a no-op when the schema is already correct.
+        """
+        version = self._schema_version()
+        if version < 1:
+            self._migrate_v1_enforcement()
+        if version < 2:
+            self._migrate_v2_chain()
+        self._conn.execute(
+            "INSERT INTO schema_version (id, version) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
+            (SCHEMA_VERSION,),
+        )
+
+    def _schema_version(self) -> int:
+        row = self._conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def _request_columns(self) -> set[str]:
+        return {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+
+    def _migrate_v1_enforcement(self) -> None:
         # Databases created before the warn/block split have a boolean
         # ``blocked`` column but no ``enforcement``. ``CREATE TABLE IF NOT
         # EXISTS`` leaves them untouched, so add the column here or inserts
         # referencing ``enforcement`` would fail. Old ``blocked=1`` rows
         # conflated warn + block; backfill them to 'flagged' since the shipped
         # default only ever produced warns (forwarded), not real 403s.
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+        columns = self._request_columns()
         if "enforcement" in columns:
             return
         self._conn.execute("ALTER TABLE requests ADD COLUMN enforcement TEXT")
         if "blocked" in columns:
             self._conn.execute("UPDATE requests SET enforcement = 'flagged' WHERE blocked = 1")
+
+    def _migrate_v2_chain(self) -> None:
+        # Chain columns stay NULL on pre-v0.2 rows. Backfilling them would
+        # produce a chain over rows that were freely editable before the chain
+        # existed, which proves nothing and misleads anyone who verifies it.
+        columns = self._request_columns()
+        for name, affinity in _V2_CHAIN_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {affinity}")
+        # Created here rather than in schema.sql: on a v0.1 database the seq
+        # column does not exist when schema.sql runs. NULLs are exempt from
+        # UNIQUE in SQLite, so unchained rows coexist fine.
+        self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_seq ON requests(seq)")
 
     def _enable_wal(self) -> None:
         row = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
@@ -107,29 +201,224 @@ class Store:
             raise RuntimeError(f"failed to enable WAL mode (got {actual!r})")
 
     def insert_request(self, record: RequestRecord) -> int:
-        cursor = self._conn.execute(
-            f"INSERT INTO requests ({_INSERT_COLUMNS}) VALUES ({_INSERT_PLACEHOLDERS})",
-            (
-                record.ts,
-                record.tool,
-                record.method,
-                record.scheme,
-                record.host,
-                record.path,
-                record.req_bytes,
-                record.resp_bytes,
-                record.status,
-                record.headers_json,
-                record.body_excerpt,
-                record.body_hash,
-                record.redactions_applied_json,
-                record.enforcement,
-            ),
-        )
+        """Append one request, linking it into the hash chain.
+
+        The row insert and the chain-head advance are one transaction: a crash
+        between them would otherwise leave the head pointing at an entry that
+        is not in the log, which reads as tampering.
+        """
+        headers_sha256 = chain.hash_text(record.headers_json)
+        body_excerpt_sha256 = chain.hash_text(record.body_excerpt)
+        with self._write_transaction():
+            seq, prev_hash = self._chain_head()
+            entry_hash = chain.entry_hash(
+                {
+                    "seq": seq,
+                    "ts": record.ts,
+                    "tool": record.tool,
+                    "method": record.method,
+                    "scheme": record.scheme,
+                    "host": record.host,
+                    "path": record.path,
+                    "req_bytes": record.req_bytes,
+                    "resp_bytes": record.resp_bytes,
+                    "status": record.status,
+                    "headers_sha256": headers_sha256,
+                    "body_hash": record.body_hash,
+                    "body_excerpt_sha256": body_excerpt_sha256,
+                    "redactions_applied_json": record.redactions_applied_json,
+                    "enforcement": record.enforcement,
+                    "prev_hash": prev_hash,
+                }
+            )
+            cursor = self._conn.execute(
+                f"INSERT INTO requests ({_INSERT_COLUMNS}) VALUES ({_INSERT_PLACEHOLDERS})",
+                (
+                    record.ts,
+                    record.tool,
+                    record.method,
+                    record.scheme,
+                    record.host,
+                    record.path,
+                    record.req_bytes,
+                    record.resp_bytes,
+                    record.status,
+                    record.headers_json,
+                    record.body_excerpt,
+                    record.body_hash,
+                    record.redactions_applied_json,
+                    record.enforcement,
+                    seq,
+                    prev_hash,
+                    entry_hash,
+                    headers_sha256,
+                    body_excerpt_sha256,
+                ),
+            )
+            self._conn.execute(
+                "UPDATE chain_state SET next_seq = ?, head_hash = ? WHERE id = 1",
+                (seq + 1, entry_hash),
+            )
         rowid = cursor.lastrowid
         if rowid is None:
             raise RuntimeError("insert returned no rowid")
         return rowid
+
+    @contextmanager
+    def _write_transaction(self) -> Iterator[None]:
+        if self._read_only:
+            raise ReadOnlyStoreError(f"{self.path} is open read-only")
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
+    def _chain_head(self) -> tuple[int, str]:
+        """Return ``(next_seq, head_hash)``, seeding genesis on first use.
+
+        Must be called inside ``_write_transaction``.
+        """
+        row = self._conn.execute(
+            "SELECT next_seq, head_hash FROM chain_state WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            self._conn.execute(
+                "INSERT INTO chain_state (id, next_seq, head_hash) VALUES (1, 1, ?)",
+                (chain.GENESIS_PREV_HASH,),
+            )
+            return 1, chain.GENESIS_PREV_HASH
+        return int(row["next_seq"]), str(row["head_hash"])
+
+    def head_hash(self) -> str:
+        """Current chain head, or the genesis value if nothing is chained yet."""
+        row = self._conn.execute("SELECT head_hash FROM chain_state WHERE id = 1").fetchone()
+        return str(row["head_hash"]) if row is not None else chain.GENESIS_PREV_HASH
+
+    def write_checkpoint(self, reason: str) -> sqlite3.Row:
+        """Seal the current head into ``chain_checkpoints`` and return the row.
+
+        A checkpoint only proves anything once its ``head_hash`` has left the
+        machine, so callers should surface the value rather than just storing
+        it.
+        """
+        with self._write_transaction():
+            next_seq, head = self._chain_head()
+            cursor = self._conn.execute(
+                "INSERT INTO chain_checkpoints (ts, seq_end, head_hash, entry_count, reason) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    datetime.now(UTC).isoformat(),
+                    next_seq - 1,
+                    head,
+                    self._chained_row_count(),
+                    reason,
+                ),
+            )
+            checkpoint_id = cursor.lastrowid
+        row = self._conn.execute(
+            "SELECT * FROM chain_checkpoints WHERE id = ?", (checkpoint_id,)
+        ).fetchone()
+        return cast("sqlite3.Row", row)
+
+    def _chained_row_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM requests WHERE seq IS NOT NULL").fetchone()
+        return int(row[0])
+
+    def verify_chain(self) -> ChainVerification:
+        """Recompute every chained entry and check its linkage.
+
+        Detects edited content, deleted rows (seq gaps), inserted or reordered
+        rows (linkage breaks), and a stored head that disagrees with the log.
+        Stops at the first break, since everything after it is unverifiable.
+        """
+        unchained = int(
+            self._conn.execute("SELECT COUNT(*) FROM requests WHERE seq IS NULL").fetchone()[0]
+        )
+        rows = self._conn.execute("SELECT * FROM requests WHERE seq IS NOT NULL ORDER BY seq")
+
+        expected_prev = chain.GENESIS_PREV_HASH
+        expected_seq = 1
+        checked = 0
+        content_unavailable = 0
+        first_seq: int | None = None
+        last_seq: int | None = None
+
+        def broken(seq: int, detail: str) -> ChainVerification:
+            return ChainVerification(
+                status="broken",
+                checked=checked,
+                unchained=unchained,
+                first_seq=first_seq,
+                last_seq=last_seq,
+                head_hash=self.head_hash(),
+                broken_at=seq,
+                detail=detail,
+                content_unavailable=content_unavailable,
+            )
+
+        for row in rows:
+            seq = int(row["seq"])
+            if first_seq is None:
+                first_seq = seq
+            if seq != expected_seq:
+                return broken(seq, f"sequence gap: expected seq {expected_seq}, found {seq}")
+            if row["prev_hash"] != expected_prev:
+                return broken(seq, f"seq {seq} does not link to the previous entry")
+            recomputed = chain.entry_hash(chain.chain_payload(_row_to_dict(row)))
+            if recomputed != row["entry_hash"]:
+                return broken(seq, f"seq {seq} does not match its recorded hash")
+
+            # The chain commits to the digests, so a digest column that no
+            # longer describes its text column would otherwise slip through:
+            # an attacker could rewrite a prompt body and leave the hash alone.
+            # A null text column is retention having cleared it, which is
+            # legitimate but leaves the content uncheckable.
+            for text_column, digest_column in (
+                ("body_excerpt", "body_excerpt_sha256"),
+                ("headers_json", "headers_sha256"),
+            ):
+                if row[text_column] is None:
+                    if row[digest_column] is not None:
+                        content_unavailable += 1
+                    continue
+                if chain.hash_text(row[text_column]) != row[digest_column]:
+                    return broken(seq, f"seq {seq} {text_column} does not match its stored digest")
+
+            expected_prev = str(row["entry_hash"])
+            expected_seq = seq + 1
+            last_seq = seq
+            checked += 1
+
+        if checked == 0:
+            return ChainVerification(
+                status="empty",
+                checked=0,
+                unchained=unchained,
+                first_seq=None,
+                last_seq=None,
+                head_hash=self.head_hash(),
+            )
+
+        stored_head = self.head_hash()
+        if stored_head != expected_prev:
+            assert last_seq is not None
+            return broken(
+                last_seq,
+                "stored chain head does not match the end of the log (entries removed?)",
+            )
+
+        return ChainVerification(
+            status="ok",
+            checked=checked,
+            unchained=unchained,
+            first_seq=first_seq,
+            last_seq=last_seq,
+            head_hash=stored_head,
+            content_unavailable=content_unavailable,
+        )
 
     def query_recent(self, limit: int = 100) -> list[sqlite3.Row]:
         return list(
@@ -288,6 +577,15 @@ def truncate_body_excerpt(body: bytes | str | None) -> str | None:
         return None
     raw = body if isinstance(body, bytes) else body.encode("utf-8", "replace")
     return raw[:BODY_EXCERPT_MAX].decode("utf-8", "replace")
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """Materialise a row as a name-keyed dict.
+
+    ``dict(row)`` does not work: ``sqlite3.Row`` iterates over values, not
+    keys, so the ``.keys()`` call is load-bearing rather than redundant.
+    """
+    return {key: row[key] for key in row.keys()}  # noqa: SIM118
 
 
 def _csv_fieldnames() -> list[str]:

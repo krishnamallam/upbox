@@ -148,7 +148,10 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.store = Store(db_path)
+        # Read-only: the proxy is the sole writer. A write from here would
+        # advance the log without advancing the hash chain, which verifies as
+        # tampering.
+        app.state.store = Store(db_path, read_only=True)
         try:
             yield
         finally:
@@ -160,7 +163,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
 
     def store(request: Request) -> Store:
         result = request.app.state.store
-        return result if isinstance(result, Store) else Store(db_path)
+        return result if isinstance(result, Store) else Store(db_path, read_only=True)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:

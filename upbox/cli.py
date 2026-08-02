@@ -214,6 +214,65 @@ def _yn(value: bool | None) -> str:
 
 
 @app.command()
+def verify() -> None:
+    """Recompute the audit-log hash chain and report whether it holds.
+
+    Exit code 0 if the chain verifies (or is empty), 1 if it is broken.
+    """
+    from upbox.db.store import Store
+
+    with Store() as store:
+        result = store.verify_chain()
+
+    if result.status == "empty":
+        typer.echo("Chain is empty: no requests captured since the chain was introduced.")
+    elif result.status == "ok":
+        typer.echo(f"Chain OK: {result.checked} entries, seq {result.first_seq}-{result.last_seq}.")
+    else:
+        typer.echo(f"Chain BROKEN at seq {result.broken_at}: {result.detail}", err=True)
+        typer.echo(f"Verified {result.checked} entries before the break.", err=True)
+
+    if result.unchained:
+        typer.echo(
+            f"{result.unchained} row(s) predate the chain and are not covered by it. "
+            "They were never backfilled on purpose."
+        )
+
+    typer.echo(f"Head: {result.head_hash}")
+    if result.status != "broken":
+        typer.echo(
+            "This proves the log is internally consistent, not that it is complete. "
+            "Record the head hash somewhere off this machine so truncation is detectable."
+        )
+        return
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def checkpoint(
+    reason: str = typer.Option("manual", help="Why this checkpoint was taken."),
+    output: str = typer.Option("", "-o", help="Also write the head hash to this file."),
+) -> None:
+    """Seal the current chain head so later truncation becomes detectable."""
+    from pathlib import Path
+
+    from upbox.db.store import Store
+
+    with Store() as store:
+        row = store.write_checkpoint(reason)
+
+    typer.echo(f"Checkpoint {row['id']} at seq {row['seq_end']} ({row['entry_count']} entries)")
+    typer.echo(f"Head: {row['head_hash']}")
+    if output:
+        Path(output).write_text(f"{row['ts']} seq={row['seq_end']} {row['head_hash']}\n")
+        typer.echo(f"wrote {output}")
+    typer.echo(
+        "A checkpoint only proves anything once this hash has left the machine. "
+        "Mail it to yourself, commit it, or have it timestamped."
+    )
+
+
+@app.command()
 def export(
     fmt: str = typer.Option("jsonl", "--format", help="jsonl or csv."),
     output: str = typer.Option("-", "-o", help="Output path; - for stdout."),
