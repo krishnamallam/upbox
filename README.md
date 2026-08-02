@@ -229,13 +229,73 @@ The proxy and dashboard never talk to each other directly. They share state thro
 - Tools that pin certificates and reject the local CA (some won't work without bypasses).
 - Malicious local processes that read files directly without going through your tools.
 - Data already exfiltrated before installation.
+- Anyone with write access to `~/.upbox/upbox.db`. The hash chain makes edits *detectable*, not impossible. See "Tamper evidence" below.
 
 **What upbox itself does**
 - Reads your AI traffic via a local CA you install (and can uninstall).
-- Stores audit data in `~/.upbox/upbox.db` (SQLite; encrypted-at-rest planned for v0.2).
+- Stores audit data in `~/.upbox/upbox.db` (SQLite, owner-only permissions, not encrypted by upbox; see "At rest").
 - Stores each request body up to a **100 KB cap** (`BODY_EXCERPT_MAX`), after redaction strips secrets. Bodies are recorded with a SHA-256 hash and their true size, so a truncated body is still provable and clearly marked in the dashboard rather than silently cut. The dashboard pretty-prints JSON bodies.
 - Serves the dashboard on `127.0.0.1` only.
 - Never makes outbound network calls of its own.
+
+## At rest
+
+**upbox does not encrypt its own database, on purpose.** It sets `~/.upbox` to
+`0700` and the database to `0600`, and leaves encryption to the volume.
+
+The reasoning is the key, not the cipher. upbox runs as an unattended daemon
+that survives reboots, so any in-app encryption needs a key it can reach with no
+human present. In practice that means a key file next to the database, which
+defeats `strings upbox.db` and nothing else while letting a README claim
+"encrypted at rest". A passphrase at every start breaks unattended restart and
+gets disabled within a week. An OS keychain is right in principle but only stops
+an attacker who does not already have the unlocked user session, which is the
+session the daemon runs in.
+
+The threat that actually happens to a laptop is theft or loss, and FileVault,
+BitLocker and LUKS solve exactly that, with keys in a TPM or Secure Enclave that
+no Python process can match. So turn one of them on:
+
+| Platform | Enable | Check |
+|---|---|---|
+| macOS | System Settings, Privacy and Security, FileVault | `fdesetup status` |
+| Windows | Settings, Privacy and Security, Device encryption | `manage-bde -status C:` |
+| Linux | LUKS at install time, or `cryptsetup` | `lsblk -o NAME,TYPE` |
+
+`upbox doctor` reports whether it is on, the database file modes, and the chain
+status. It reports `UNKNOWN` rather than guessing when it cannot tell.
+
+The stronger control is not storing the data in the first place: redaction
+strips secrets before they are written, and retention (`body_days`, default 7)
+clears stored bodies on a schedule. A body you never kept needs no key.
+
+## Tamper evidence
+
+Every captured request is chained: each row carries a SHA-256 over its own
+fields plus the previous row's hash. `upbox verify` recomputes the chain.
+
+```console
+$ upbox verify
+Chain OK: 18422 entries, seq 1-18422.
+Head: e31d4c9f...
+```
+
+**What this detects:** edited content, deleted rows, inserted or reordered rows,
+silent corruption, and a botched restore.
+
+**What it does not detect.** The algorithm is public and keyless, so anyone with
+write access to the database and a copy of upbox can recompute a perfectly
+consistent chain over whatever contents they like. Deleting the last N entries
+and rewinding the head produces a valid shorter chain. In the intended
+deployment the person with that access is the person being audited.
+
+The chain is worth something only once a head hash has left the machine. That is
+what `upbox checkpoint` is for: it seals the current head so you can mail it to
+yourself, commit it, or have it timestamped. upbox will not do that for you,
+because it makes no outbound network calls, and that rule is worth more than
+automatic anchoring would be.
+
+The chain proves order, not time. Timestamps are unattested host wall clock.
 
 ## EU AI Act and GDPR mapping
 

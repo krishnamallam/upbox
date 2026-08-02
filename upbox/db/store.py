@@ -21,6 +21,7 @@ from importlib import resources
 from pathlib import Path
 from typing import IO, Any, cast
 
+from upbox.atrest import harden_path_permissions
 from upbox.db import chain
 from upbox.retention import RetentionPolicy
 
@@ -158,6 +159,9 @@ class Store:
         self._init_schema()
         self._migrate()
         self._enable_wal()
+        # After WAL: enabling it creates the -wal and -shm files, which hold
+        # recently written rows and need the same mode as the database.
+        harden_path_permissions(resolved)
         if read_only:
             # Set last: schema init and migration both need to write.
             self._conn.execute("PRAGMA query_only = 1")

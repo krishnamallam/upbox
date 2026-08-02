@@ -259,6 +259,54 @@ def verify() -> None:
 
 
 @app.command()
+def doctor() -> None:
+    """Report at-rest protection for the audit database, and chain health.
+
+    upbox does not encrypt its own database. This tells you whether the thing
+    that actually protects it, full-disk encryption, is switched on.
+    """
+    from upbox.atrest import (
+        DIR_MODE,
+        FILE_MODE,
+        harden_path_permissions,
+        path_mode,
+        volume_encryption_status,
+    )
+    from upbox.db.store import DEFAULT_DB_PATH, Store
+
+    db = DEFAULT_DB_PATH
+    typer.echo(f"Database: {db}")
+    typer.echo(f"  Exists:               {_yn(db.exists())}")
+
+    # Tighten before reporting, or the report shows modes it is about to fix
+    # itself when it opens the store below.
+    harden_path_permissions(db)
+    dir_mode = path_mode(db.parent)
+    file_mode = path_mode(db) if db.exists() else "n/a"
+    typer.echo(f"  Directory mode:       {dir_mode} (want {DIR_MODE:04o})")
+    typer.echo(f"  Database mode:        {file_mode} (want {FILE_MODE:04o})")
+
+    encryption = volume_encryption_status(db.parent)
+    typer.echo("")
+    typer.echo("At rest:")
+    typer.echo(f"  Volume encryption:    {encryption.state.upper()} ({encryption.detail})")
+    typer.echo("  upbox in-app crypto:  NONE, by design (see the At rest section of the README)")
+    if encryption.is_encrypted is False:
+        typer.echo(
+            "  ACTION: the audit log contains prompt bodies. Turn on full-disk encryption.",
+        )
+
+    if db.exists():
+        with Store(db, read_only=True) as store:
+            result = store.verify_chain()
+        typer.echo("")
+        typer.echo("Audit log:")
+        typer.echo(f"  Chain:                {result.status.upper()}")
+        typer.echo(f"  Entries verified:     {result.checked}")
+        typer.echo(f"  Head:                 {result.head_hash}")
+
+
+@app.command()
 def prune(
     dry_run: bool = typer.Option(False, "--dry-run", help="Report what would go, change nothing."),
 ) -> None:
