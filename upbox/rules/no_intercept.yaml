@@ -1,0 +1,77 @@
+# Destinations upbox must never decrypt, whatever else is configured.
+#
+# Copy to ~/.upbox/rules/no_intercept.yaml to change it. Entries are Python
+# regexes matched against "host:port" by mitmproxy's ignore_hosts. Matching
+# connections are tunnelled straight through: no certificate is generated, no
+# body is read, nothing is written to the audit log.
+#
+# WHY THIS EXISTS
+#
+# upbox works by installing a CA and intercepting TLS. Deployed across a
+# workforce that is employee monitoring, and monitoring has to be proportionate
+# to its purpose. Article 29 Working Party Opinion 2/2017 on data processing at
+# work is explicit that generalised interception of all communications is hard
+# to justify, and that traffic such as private webmail, online banking and
+# health services should be excluded from inspection by configuration.
+#
+# This list is that exclusion, and it applies even when the TLS allowlist is
+# disabled or --capture-all is in use. It is a floor, not a ceiling.
+#
+# EXTEND THIS LIST, DO NOT TRIM IT.
+#
+# Every entry you remove widens what upbox decrypts on someone else's machine.
+# The purpose of upbox is auditing AI tool traffic, and none of the categories
+# below are AI tools. Removing them buys nothing and costs proportionality.
+#
+# See docs/ai-act-mapping.md, GDPR Article 88 section, before deploying upbox
+# on machines you do not personally own.
+
+# --- Banking and payments --------------------------------------------------
+- "(^|\\.)paypal\\.com:"
+- "(^|\\.)stripe\\.com:"
+- "(^|\\.)revolut\\.com:"
+- "(^|\\.)wise\\.com:"
+- "(^|\\.)intesasanpaolo\\.com:"
+- "(^|\\.)unicredit\\.it:"
+- "(^|\\.)chase\\.com:"
+- "(^|\\.)bankofamerica\\.com:"
+- "(^|\\.)wellsfargo\\.com:"
+- "(^|\\.)hsbc\\.co\\.uk:"
+- "(^|\\.)barclays\\.co\\.uk:"
+- "(^|\\.)coinbase\\.com:"
+
+# --- Health ----------------------------------------------------------------
+- "(^|\\.)nhs\\.uk:"
+- "(^|\\.)mychart\\.com:"
+- "(^|\\.)salute\\.gov\\.it:"
+- "(^|\\.)doctolib\\.(it|fr|de):"
+
+# --- Private webmail and messaging ----------------------------------------
+- "(^|\\.)mail\\.google\\.com:"
+- "(^|\\.)outlook\\.live\\.com:"
+- "(^|\\.)mail\\.proton\\.me:"
+- "(^|\\.)protonmail\\.com:"
+- "(^|\\.)tutanota\\.com:"
+- "(^|\\.)fastmail\\.com:"
+- "(^|\\.)web\\.whatsapp\\.com:"
+- "(^|\\.)messenger\\.com:"
+- "(^|\\.)signal\\.org:"
+
+# --- Government and tax ----------------------------------------------------
+- "(^|\\.)agenziaentrate\\.gov\\.it:"
+- "(^|\\.)inps\\.it:"
+- "(^|\\.)gov\\.uk:"
+- "(^|\\.)irs\\.gov:"
+- "(^|\\.)ssa\\.gov:"
+- "(^|\\.)europa\\.eu:"
+
+# --- Credential and identity providers ------------------------------------
+# Not privacy categories, but interception here breaks logins and would put
+# session material in front of the proxy.
+- "(^|\\.)login\\.microsoftonline\\.com:"
+- "(^|\\.)accounts\\.google\\.com:"
+- "(^|\\.)okta\\.com:"
+- "(^|\\.)duosecurity\\.com:"
+- "(^|\\.)1password\\.com:"
+- "(^|\\.)bitwarden\\.com:"
+- "(^|\\.)lastpass\\.com:"
