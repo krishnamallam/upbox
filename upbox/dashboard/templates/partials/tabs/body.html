@@ -3,7 +3,7 @@
   {% if row['req_bytes'] and row['req_bytes'] > body_excerpt_max %}
     <p class="body-note">Showing first {{ body_excerpt_max | bytes }} of {{ row['req_bytes'] | bytes }}. Full body not stored (integrity hash recorded).</p>
   {% endif %}
-  <pre class="body">{{ row['body_excerpt'] | pretty_json | redact_marks }}</pre>
+  <pre class="body">{{ row['body_excerpt'] | format_body(content_type) | redact_marks }}</pre>
 {% else %}
   <pre class="body">(empty)</pre>
 {% endif %}
