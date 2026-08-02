@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.2.0 (unreleased)
+
+The compliance release, reshaped. v0.2 was scoped as the "AI Act enforcement"
+release for 1 August 2026. On 24 July 2026,
+[Regulation (EU) 2026/1744](https://eur-lex.europa.eu/eli/reg/2026/1744/oj)
+(the Digital Omnibus on AI) amended Article 113 and deferred Chapter III
+Sections 1 to 3, so the deployer obligations this project was pinned to now
+apply from 2 December 2027 (Annex III) and 2 August 2028 (Annex I). Article 50
+transparency did start on 2 August 2026, and GDPR always applied.
+
+So this release is about making the audit log hold up as evidence, and about not
+creating legal risk for the people who deploy it.
+
+### Security
+
+- **Auth-bearing headers are no longer stored.** `headers_json` kept
+  `Authorization`, `Cookie`, and `x-api-key` values verbatim on every row, so
+  every authenticated request wrote a live credential into the audit database.
+  Values are now replaced with `[REDACTED:header]`; the header name is kept,
+  since carrying a credential is itself worth recording. **If you have been
+  running upbox, rotate any keys used through it and delete the old database.**
+  This is deliberately not counted in `redactions_applied_json`, which means
+  "upbox changed what was sent": the real value still went to the destination.
+- **Owner-only permissions** (`0700` on `~/.upbox`, `0600` on the database and
+  its `-wal`/`-shm`) are enforced at every open.
+
+### Added
+
+- **Tamper-evident hash chain.** Each row carries a SHA-256 over its own fields
+  plus the previous row's hash. `upbox verify` recomputes the chain and reports
+  OK, BROKEN at a seq, or empty, with exit codes 0 and 1. `upbox checkpoint`
+  seals the current head so it can leave the machine.
+- **`upbox.audit.v1` export format**, via `upbox export --format audit`.
+  Newline-delimited JSON carrying ruleset digests, the chain verification
+  result, retention disclosures, a coverage statement, and per-record notes.
+  `jsonl` and `csv` are unchanged.
+- **Configurable retention** in `~/.upbox/rules/retention.yaml`. `body_days`
+  (default 7) clears stored bodies and headers while keeping the chain
+  verifying; `record_days` (default null) deletes rows and records a chain gap
+  so verification can resume across it. Plus `upbox prune`, `upbox hold` for
+  legal holds, and a daily pass in the proxy.
+- **`upbox doctor`**, reporting volume-encryption status per platform, database
+  file modes, and chain health. It reports UNKNOWN rather than guessing.
+- **TLS-interception exclusion list** (`no_intercept.yaml`). Banking, health,
+  private webmail, government, and identity-provider destinations are never
+  decrypted, regardless of the allowlist or `--capture-all`.
+- A `schema_version` table with numbered migrations, replacing the ad-hoc
+  add-a-column pattern.
+
+### Changed
+
+- **Encrypted-at-rest SQLite was cut**, not deferred. On an unattended daemon
+  the key ends up next to the database, which defeats `strings` and nothing
+  else while licensing a false README claim. upbox now documents full-disk
+  encryption and reports whether it is on. See the "At rest" section of the
+  README for the full reasoning.
+- **Team mode moved to v0.3**, behind the workplace-deployment groundwork.
+- The dashboard opens the database read-only. The chain is only sound with a
+  single writer, and a stray dashboard write would verify as tampering.
+- The "Article 26 export format" on the roadmap became `upbox.audit.v1`.
+  Article 26(6) covers logs the high-risk AI system generates about itself;
+  upbox observes the network from outside the system and cannot produce those.
+
+### Documentation
+
+- Corrected the AI Act dates across `README.md` and `docs/ai-act-mapping.md`,
+  which claimed full high-risk obligations took effect 2 August 2026.
+- Added a GDPR Article 88 section: intercepting TLS on employee devices is
+  employee monitoring, and in some Member States (Italy, via Art. 4 of Law
+  300/1970) it needs a union agreement or Labour Inspectorate authorisation.
+- New README sections: "At rest" and "Tamper evidence", both stating plainly
+  what upbox does not protect against.
+- Noted that `docs/ai-act-mapping.md` had documented a `blocked` column renamed
+  to `enforcement` back in v0.1.0.
+
 ## v0.1.2 (2026-06-16)
 
 Live-reload of rule files and a redaction-leak fix.
@@ -137,20 +212,6 @@ never lists a VPN client), per-tool allowlist policy with the
 flagged/blocked split, the `blocked`→`enforcement` schema migration,
 dashboard routes + filter/tab rendering, and supervisor child-death
 handling.
-
-## v0.1.2 — distribution polish (planned ~2 weeks post-v0.1)
-
-- Firefox NSS auto-install on Windows.
-- Live-reload of rule files (currently requires `upbox start` restart).
-
-## v0.2 — compliance-ready (planned 2026-08-01)
-
-- Article 26 export format (canonical EU schema if published,
-  best-effort otherwise).
-- Tamper-evident hash chain on the audit log.
-- Encrypted-at-rest SQLite.
-- Team mode (LAN-local central dashboard, multiple endpoints).
-- Configurable retention.
 
 ## v0.3 and beyond (planned)
 

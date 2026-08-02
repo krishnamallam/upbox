@@ -111,6 +111,33 @@ upbox start --capture-spec "claude,cursor"   # capture only these
 upbox start --capture-all                    # capture every process (drops VPNs)
 ```
 
+Banking, health, private webmail, government, and identity-provider
+destinations are **never decrypted**, even under `--capture-all`. That list
+lives in `~/.upbox/rules/no_intercept.yaml` and is meant to be extended, not
+trimmed. See "Deploying on machines you don't own" below.
+
+### Audit commands
+
+```sh
+upbox verify                       # recompute the hash chain; exit 1 if broken
+upbox checkpoint -o head.txt       # seal the current head so it can leave the machine
+upbox doctor                       # at-rest protection, file modes, chain health
+upbox export --format audit        # upbox.audit.v1 (chain proof + disclosures)
+upbox prune --dry-run              # what retention would remove
+upbox hold --since 2026-07-01      # exempt a range from retention
+```
+
+### Deploying on machines you don't own
+
+upbox intercepts TLS. On an employee device that is employee monitoring, and
+GDPR Article 88 leaves the rules largely to national law. In Italy, software
+enabling remote monitoring of employees needs a union agreement or Labour
+Inspectorate authorisation under Article 4 of Law 300/1970, and the Garante has
+acted on it. Inform workers and their representatives first, and read the
+Article 88 section of [docs/ai-act-mapping.md](docs/ai-act-mapping.md).
+
+Running upbox on your own machine raises none of this.
+
 ## Verify the install
 
 These should all succeed:

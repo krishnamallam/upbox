@@ -248,6 +248,24 @@ def test_record_deletion_is_disclosed_by_verification(tmp_store: Store) -> None:
     assert tmp_store.verify_chain().entries_deleted == 2
 
 
+def test_successive_prunes_leave_adjacent_gaps_that_still_verify(tmp_store: Store) -> None:
+    """Daily retention makes this the normal case, not an edge case."""
+    _seed(tmp_store, [500, 450, 300, 10])
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=200), now=NOW)
+
+    assert tmp_store.verify_chain().status == "ok"
+
+
+def test_successive_prunes_report_every_deleted_entry(tmp_store: Store) -> None:
+    _seed(tmp_store, [500, 450, 300, 10])
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
+    tmp_store.prune(RetentionPolicy(body_days=None, record_days=200), now=NOW)
+
+    assert tmp_store.verify_chain().entries_deleted == 3
+
+
 def test_an_unrecorded_deletion_still_reads_as_tampering(tmp_store: Store) -> None:
     """Retention gets a gap record. A raw DELETE does not, and must break."""
     _seed(tmp_store, [500, 450, 10])

@@ -506,12 +506,15 @@ class Store:
             # A gap is only acceptable where a retention deletion recorded both
             # its range and the hash of the last entry it removed, which is what
             # lets linkage resume. An unrecorded gap is tampering.
-            if seq != expected_seq and expected_seq in gaps:
+            # A while loop, not an if: successive retention passes leave
+            # adjacent gaps (1-2, then 3-4), and each has to be consumed in
+            # turn or the second one reads as tampering. Terminates because
+            # seq_end >= seq_start, so expected_seq strictly increases.
+            while seq != expected_seq and expected_seq in gaps:
                 gap = gaps[expected_seq]
-                if int(gap["seq_end"]) + 1 == seq:
-                    expected_prev = str(gap["last_entry_hash"])
-                    entries_deleted += int(gap["entry_count"])
-                    expected_seq = seq
+                expected_prev = str(gap["last_entry_hash"])
+                entries_deleted += int(gap["entry_count"])
+                expected_seq = int(gap["seq_end"]) + 1
             if seq != expected_seq:
                 return broken(seq, f"sequence gap: expected seq {expected_seq}, found {seq}")
             if row["prev_hash"] != expected_prev:
