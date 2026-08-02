@@ -8,13 +8,14 @@ escapes and (b) no row was persisted.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from mitmproxy.test import tflow, tutils
 
-from upbox.addons.capture import CaptureAddon
+from upbox.addons.capture import HEADER_REDACTION_MARKER, CaptureAddon
 from upbox.db.store import BODY_EXCERPT_MAX, Store
 
 
@@ -134,3 +135,61 @@ def test_capture_addon_truncates_body_excerpt(store: Store) -> None:
 
     assert row["body_excerpt"] is not None
     assert len(row["body_excerpt"].encode("utf-8")) == BODY_EXCERPT_MAX
+
+
+def _stored_headers(store: Store, name: str, value: str) -> dict[str, str]:
+    """Capture one flow carrying ``name: value`` and return the stored headers."""
+    flow = _flow()
+    flow.request.headers[name] = value
+    CaptureAddon(store).response(flow)
+    return cast("dict[str, str]", json.loads(store.query_recent()[0]["headers_json"]))
+
+
+def test_capture_redacts_authorization_header(store: Store) -> None:
+    headers = _stored_headers(store, "Authorization", "Bearer sk-ant-api03-secret")
+
+    assert headers["Authorization"] == HEADER_REDACTION_MARKER
+
+
+def test_capture_never_stores_the_credential_itself(store: Store) -> None:
+    _stored_headers(store, "Authorization", "Bearer sk-ant-api03-secret")
+
+    assert "sk-ant-api03-secret" not in store.query_recent()[0]["headers_json"]
+
+
+def test_capture_redacts_auth_header_whatever_its_casing(store: Store) -> None:
+    headers = _stored_headers(store, "AUTHORIZATION", "Bearer secret")
+
+    assert headers["AUTHORIZATION"] == HEADER_REDACTION_MARKER
+
+
+def test_capture_redacts_cookie_header(store: Store) -> None:
+    headers = _stored_headers(store, "Cookie", "session=abc123")
+
+    assert headers["Cookie"] == HEADER_REDACTION_MARKER
+
+
+def test_capture_redacts_x_api_key_header(store: Store) -> None:
+    headers = _stored_headers(store, "x-api-key", "sk-ant-api03-secret")
+
+    assert headers["x-api-key"] == HEADER_REDACTION_MARKER
+
+
+def test_capture_keeps_ordinary_header_values(store: Store) -> None:
+    headers = _stored_headers(store, "Content-Type", "application/json")
+
+    assert headers["Content-Type"] == "application/json"
+
+
+def test_capture_keeps_the_redacted_header_name(store: Store) -> None:
+    headers = _stored_headers(store, "Authorization", "Bearer secret")
+
+    assert "Authorization" in headers
+
+
+def test_header_redaction_is_not_reported_as_a_body_redaction(store: Store) -> None:
+    """Header values are still forwarded. Only storage changes, so claiming a
+    redaction fired would imply the credential never left the machine."""
+    _stored_headers(store, "Authorization", "Bearer secret")
+
+    assert store.query_recent()[0]["redactions_applied_json"] is None
