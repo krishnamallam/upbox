@@ -41,7 +41,15 @@ CREATE TABLE IF NOT EXISTS requests (
     -- retention can null out headers_json/body_excerpt and the chain still
     -- verifies.
     headers_sha256           TEXT,
-    body_excerpt_sha256      TEXT
+    body_excerpt_sha256      TEXT,
+
+    -- Retention. pruned_at/pruned_fields record that body_excerpt and/or
+    -- headers_json were cleared by policy, so a null body is distinguishable
+    -- from a request that never had one. legal_hold exempts a row from every
+    -- retention pass.
+    pruned_at                TEXT,
+    pruned_fields            TEXT,
+    legal_hold               INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_requests_ts   ON requests(ts);
@@ -76,3 +84,19 @@ CREATE TABLE IF NOT EXISTS chain_checkpoints (
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkpoints_seq_end ON chain_checkpoints(seq_end);
+
+-- Ranges of entries removed by retention. Deleting rows necessarily breaks
+-- both seq contiguity and prev_hash linkage, so last_entry_hash is stored to
+-- let verification resume across the gap and report it as a disclosed
+-- deletion rather than as tampering. A gap with no record here is tampering.
+CREATE TABLE IF NOT EXISTS chain_gaps (
+    id              INTEGER PRIMARY KEY,
+    ts              TEXT    NOT NULL,
+    seq_start       INTEGER NOT NULL,
+    seq_end         INTEGER NOT NULL,
+    entry_count     INTEGER NOT NULL,
+    last_entry_hash TEXT    NOT NULL,
+    reason          TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_gaps_seq_start ON chain_gaps(seq_start);

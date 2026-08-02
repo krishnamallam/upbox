@@ -21,6 +21,7 @@ from upbox.addons.enforce import EnforceAddon
 from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
+from upbox.retention import RetentionRunner
 from upbox.watch import RuleReloadWatcher, build_rule_watch_targets
 
 # Curated AI-tool process list for `upbox start`'s default LocalMode spec.
@@ -178,6 +179,7 @@ async def _run(
         redact,
         CaptureAddon(store),
         RuleReloadWatcher(build_rule_watch_targets(fingerprint, redact, enforce)),
+        RetentionRunner(store),
     )
 
     try:

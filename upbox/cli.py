@@ -237,6 +237,16 @@ def verify() -> None:
             f"{result.unchained} row(s) predate the chain and are not covered by it. "
             "They were never backfilled on purpose."
         )
+    if result.entries_deleted:
+        typer.echo(
+            f"{result.entries_deleted} entry/entries were deleted by retention. The chain "
+            "resumes across the recorded gap, but says nothing about what was removed."
+        )
+    if result.content_unavailable:
+        typer.echo(
+            f"{result.content_unavailable} stored body/header value(s) were cleared by "
+            "retention. Their digests still verify; the content cannot be re-checked."
+        )
 
     typer.echo(f"Head: {result.head_hash}")
     if result.status != "broken":
@@ -246,6 +256,54 @@ def verify() -> None:
         )
         return
     raise typer.Exit(code=1)
+
+
+@app.command()
+def prune(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would go, change nothing."),
+) -> None:
+    """Apply the retention policy from ~/.upbox/rules/retention.yaml."""
+    from upbox.db.store import Store
+    from upbox.retention import load_policy
+
+    policy = load_policy()
+    typer.echo(
+        f"Policy: body_days={policy.body_days}, record_days={policy.record_days}"
+        f" (min_record_days={policy.min_record_days})"
+    )
+    for note in policy.warnings():
+        typer.echo(f"warning: {note}", err=True)
+
+    if dry_run:
+        typer.echo("--dry-run: nothing was changed.")
+        return
+
+    with Store() as store:
+        result = store.prune(policy)
+        typer.echo(f"Cleared bodies on {result.bodies_cleared} row(s).")
+        if result.records_deleted:
+            typer.echo(
+                f"Deleted {result.records_deleted} row(s), seq "
+                f"{result.gap_seq_start}-{result.gap_seq_end}. Recorded as a chain gap so "
+                "verification reports it as a retention deletion, not tampering."
+            )
+        row = store.write_checkpoint("prune")
+        typer.echo(f"Head after prune: {row['head_hash']}")
+
+
+@app.command()
+def hold(
+    since: str = typer.Option("", help="Hold rows with ts >= this ISO timestamp."),
+    until: str = typer.Option("", help="Hold rows with ts <= this ISO timestamp."),
+    release: bool = typer.Option(False, "--release", help="Lift the hold instead of setting it."),
+) -> None:
+    """Exempt a time range from retention, for a live dispute or investigation."""
+    from upbox.db.store import Store
+
+    with Store() as store:
+        affected = store.set_legal_hold(since or None, until or None, held=not release)
+    verb = "released" if release else "held"
+    typer.echo(f"{verb} {affected} row(s).")
 
 
 @app.command()
