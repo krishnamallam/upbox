@@ -28,6 +28,9 @@ def test_supervisor_terminates_sibling_when_one_real_subprocess_dies(
     monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
     monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.05)
     monkeypatch.setattr(supervisor, "TERMINATE_GRACE", 2.0)
+    # This test is about reaping real subprocesses, not about the audit DB, and
+    # run() would otherwise create one under the developer's real home.
+    monkeypatch.setattr(supervisor, "_initialise_database", lambda: None)
 
     children: list[subprocess.Popen[bytes]] = []
 
@@ -40,12 +43,19 @@ def test_supervisor_terminates_sibling_when_one_real_subprocess_dies(
 
     import threading
 
-    def kill_first_after_delay() -> None:
-        time.sleep(0.3)
+    def kill_first_when_spawned() -> None:
+        # Waits for the spawn rather than sleeping a fixed interval: a blind
+        # sleep raced run(), and losing that race hung the poll loop until CI
+        # killed the job.
+        deadline = time.monotonic() + 30
+        while not children:
+            if time.monotonic() > deadline:  # pragma: no cover - guards a hang
+                raise AssertionError("no child was ever spawned")
+            time.sleep(0.005)
         # Cross-platform: SIGKILL on POSIX, TerminateProcess on Windows.
         children[0].kill()
 
-    threading.Thread(target=kill_first_after_delay, daemon=True).start()
+    threading.Thread(target=kill_first_when_spawned, daemon=True).start()
 
     rc = supervisor.run()
 
