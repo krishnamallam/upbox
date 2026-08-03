@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (unreleased)
+## v0.2.0 (2026-08-03)
 
 The compliance release, reshaped. v0.2 was scoped as the "AI Act enforcement"
 release for 1 August 2026. On 24 July 2026,
@@ -23,8 +23,19 @@ creating legal risk for the people who deploy it.
   running upbox, rotate any keys used through it and delete the old database.**
   This is deliberately not counted in `redactions_applied_json`, which means
   "upbox changed what was sent": the real value still went to the destination.
+- **Credentials in the URL query string are no longer stored.** `path` is
+  recorded with the query attached, and Google (among others) accepts an API key
+  there, so `?key=...` was written verbatim. Worse than the header case: `path`
+  is chained directly rather than via a digest, so retention could never clear
+  it afterwards. Values for known credential parameters (`key`, `api_key`,
+  `access_token`, `token`, `client_secret`, and similar) are now replaced with
+  `[REDACTED:query]` at capture. The rotate-and-delete advice above applies to
+  these too.
 - **Owner-only permissions** (`0700` on `~/.upbox`, `0600` on the database and
   its `-wal`/`-shm`) are enforced at every open.
+- **The dashboard no longer writes to the database.** It opens read-only, and no
+  longer runs schema migrations on your data from the reader process. `upbox
+  start` initialises the database once, before either child starts.
 
 ### Added
 
@@ -57,8 +68,6 @@ creating legal risk for the people who deploy it.
   encryption and reports whether it is on. See the "At rest" section of the
   README for the full reasoning.
 - **Team mode moved to v0.3**, behind the workplace-deployment groundwork.
-- The dashboard opens the database read-only. The chain is only sound with a
-  single writer, and a stray dashboard write would verify as tampering.
 - The "Article 26 export format" on the roadmap became `upbox.audit.v1`.
   Article 26(6) covers logs the high-risk AI system generates about itself;
   upbox observes the network from outside the system and cannot produce those.
