@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,40 @@ class FakeProc:
         self._exit_code = rc
 
 
+@pytest.fixture(autouse=True)
+def _no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep supervisor tests off the real ~/.upbox.
+
+    ``run()`` initialises the audit database before spawning children. That is
+    filesystem work these tests do not exercise, and leaving it live both wrote
+    to the developer's home directory and made the spawn slow enough to lose the
+    races below.
+    """
+    monkeypatch.setattr(supervisor, "_initialise_database", lambda: None)
+
+
+def _exit_when_spawned(spawned: list[FakeProc], index: int, rc: int) -> threading.Thread:
+    """Mark a child exited as soon as it has actually been spawned.
+
+    A fixed sleep here used to race ``run()``: on a slow runner the timer fired
+    before ``_spawn`` had appended anything, ``spawned[index]`` raised
+    IndexError in the thread, no child ever looked dead, and the supervisor
+    polled until CI killed the job six hours later.
+    """
+
+    def wait_then_exit() -> None:
+        deadline = time.monotonic() + 30
+        while len(spawned) <= index:
+            if time.monotonic() > deadline:  # pragma: no cover - guards a hang
+                raise AssertionError(f"child {index} was never spawned")
+            time.sleep(0.005)
+        spawned[index].set_exited(rc)
+
+    thread = threading.Thread(target=wait_then_exit, daemon=True)
+    thread.start()
+    return thread
+
+
 def test_supervisor_exits_when_child_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If a child returns non-zero, supervisor returns that rc and stops the other."""
     monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
@@ -59,15 +95,7 @@ def test_supervisor_exits_when_child_exits(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
 
-    import threading
-
-    def kill_first_after_delay() -> None:
-        import time as _t
-
-        _t.sleep(0.05)
-        spawned[0].set_exited(7)
-
-    threading.Thread(target=kill_first_after_delay, daemon=True).start()
+    _exit_when_spawned(spawned, 0, 7)
 
     rc = supervisor.run()
 
@@ -90,18 +118,36 @@ def test_supervisor_terminates_sibling_when_one_child_dies(
 
     monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
 
-    import threading
-
-    def kill_first() -> None:
-        import time as _t
-
-        _t.sleep(0.05)
-        spawned[0].set_exited(0)
-
-    threading.Thread(target=kill_first, daemon=True).start()
+    _exit_when_spawned(spawned, 0, 0)
     supervisor.run()
 
     assert spawned[1].terminate_calls >= 1
+
+
+def test_run_initialises_the_database_before_spawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dashboard opens read-only and will not migrate, so a writer must
+    have created and migrated the database before either child starts."""
+    monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
+    monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.01)
+
+    order: list[str] = []
+    spawned: list[FakeProc] = []
+    monkeypatch.setattr(supervisor, "_initialise_database", lambda: order.append("db"))
+
+    def fake_spawn(_args: list[str]) -> Any:
+        order.append("spawn")
+        proc = FakeProc()
+        spawned.append(proc)
+        return proc
+
+    monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
+
+    _exit_when_spawned(spawned, 0, 0)
+    supervisor.run()
+
+    assert order[0] == "db"
 
 
 def test_spawn_module_invokes_typer_app() -> None:
@@ -120,8 +166,6 @@ def test_spawn_module_invokes_typer_app() -> None:
 def test_run_forwards_capture_spec_to_proxy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import threading
-
     monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
     monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.01)
 
@@ -136,13 +180,7 @@ def test_run_forwards_capture_spec_to_proxy(
 
     monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
 
-    def exit_proxy_after_delay() -> None:
-        import time as _t
-
-        _t.sleep(0.05)
-        spawned_procs[0].set_exited(0)
-
-    threading.Thread(target=exit_proxy_after_delay, daemon=True).start()
+    _exit_when_spawned(spawned_procs, 0, 0)
     supervisor.run(capture_spec="claude.exe,cursor.exe")
 
     assert spawned_args[0] == [
@@ -155,8 +193,6 @@ def test_run_forwards_capture_spec_to_proxy(
 
 
 def test_run_forwards_no_allowlist_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import threading
-
     monkeypatch.setattr(supervisor, "PID_FILE", tmp_path / "supervisor.pid")
     monkeypatch.setattr(supervisor, "POLL_INTERVAL", 0.01)
 
@@ -171,13 +207,7 @@ def test_run_forwards_no_allowlist_flag(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(supervisor, "_spawn", fake_spawn)
 
-    def exit_proxy() -> None:
-        import time as _t
-
-        _t.sleep(0.05)
-        spawned_procs[0].set_exited(0)
-
-    threading.Thread(target=exit_proxy, daemon=True).start()
+    _exit_when_spawned(spawned_procs, 0, 0)
     supervisor.run(use_allowlist=False, extra_allow_hosts=("custom.ai",))
 
     assert "--no-allowlist" in spawned_args[0]

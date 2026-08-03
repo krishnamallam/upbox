@@ -18,24 +18,68 @@ Planned milestones for upbox. Dates are targets, not commitments. See [PLAN.md](
 
 ## v0.1.2: distribution polish (live-reload shipped 2026-06-16)
 
-- **Shipped:** Live-reload of YAML rule files — the running proxy applies edits to
+- **Shipped:** Live-reload of YAML rule files. The running proxy applies edits to
   `tools.yaml`, `redact.yaml`, and `allowlist.yaml` within ~2s, no restart.
-- **Shipped:** Redaction fix — modern Anthropic (`sk-ant-api03-…`) and OpenAI
+- **Shipped:** Redaction fix. Modern Anthropic (`sk-ant-api03-…`) and OpenAI
   (`sk-proj-…`) keys were leaking past the bundled patterns; now redacted, plus
   Google / Slack / GitHub fine-grained / Bearer coverage.
 - **Pending:** Firefox NSS auto-install on Windows.
 
-## v0.2 (target: 1 August 2026, eve of AI Act enforcement)
+## v0.2: evidence you can defend (in progress)
 
-- Article 26 audit-log export format
-- Tamper-evident hash chain
-- Encrypted-at-rest SQLite
-- Team mode (central dashboard, multiple endpoints, LAN-local)
+Originally scoped as the "AI Act enforcement" release for 1 August 2026.
+That rationale changed on 24 July 2026, when
+[Regulation (EU) 2026/1744](https://eur-lex.europa.eu/eli/reg/2026/1744/oj)
+deferred the high-risk deployer obligations (Article 26 among them) to
+2 December 2027 for Annex III and 2 August 2028 for Annex I. Article 50
+transparency still applies from 2 August 2026, and GDPR always did.
+
+So v0.2 is no longer a deadline release. It is about making the audit
+log hold up as evidence, and about not creating legal risk for the
+people who deploy it.
+
+- **Auth-header redaction.** `headers_json` stored `Authorization` and
+  `Cookie` verbatim on every row. Security fix, lands first.
+- **Tamper-evident hash chain.** Per-entry SHA-256 chain over a
+  canonical serialisation, sealed checkpoints, and `upbox verify`.
+  Honest about what it does not prove.
+- **`upbox.audit.v1` export format.** Versioned, self-describing NDJSON
+  with ruleset hashes, chain head, and an explicit coverage statement.
+  Not called an "Article 26 format": Article 26(6) governs logs the
+  high-risk system generates about itself, which a network observer
+  cannot produce.
+- **Configurable retention.** Two-tier (bodies, then whole records),
+  tombstones that preserve the chain, and per-record legal hold.
+- **At-rest hardening.** Restrictive file permissions plus an
+  `upbox doctor` that reports real full-disk-encryption status.
+  Deliberately **not** application-level encryption: on an unattended
+  daemon the key ends up next to the database, which is theatre.
+- **TLS-interception exclusion list.** Default passthrough for banking,
+  health, webmail, and government destinations, as a proportionality
+  control for workplace deployments.
+
+Moved out of v0.2:
+
+- **Encrypted-at-rest SQLite.** Cut. See at-rest hardening above.
+- **Team mode.** Deferred to v0.3. A LAN-exposed central dashboard
+  contradicts the `127.0.0.1`-only rule and multiplies the
+  employee-monitoring exposure. It needs the workplace-deployment
+  groundwork first.
 
 ## v0.3 and beyond
 
 - **Native binaries:** single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
+- **Workplace deployment pack:** worker notice template, DPIA skeleton
+  keyed to upbox's actual data flows, works-council checklist. Blocks
+  team mode.
+- **Team mode** (central dashboard, multiple endpoints, LAN-local),
+  moved from v0.2 and gated behind the deployment pack.
+- **Metadata-only mode:** `capture.bodies: false`, keeping `body_hash`
+  and sizes. The recommended configuration for multi-user deployments.
+- **Subject-transparency view:** what upbox recorded about one person,
+  for GDPR Article 15 access requests, plus a chain-preserving
+  per-record erasure path.
 - Plugin SDK for custom tool fingerprints
 - Companion browser extension (for web LLM apps)
 - macOS menu-bar app, Windows tray app
-- Configurable retention policies, alerting
+- Alerting

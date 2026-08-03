@@ -16,11 +16,43 @@ import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
+from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 from typing import IO, Any, cast
 
+from upbox.atrest import harden_path_permissions
+from upbox.db import chain
+from upbox.retention import RetentionPolicy
+
 DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
+
+# Bumped whenever _migrate gains a step. Fresh databases are created at the
+# final shape by schema.sql and then run every migration anyway; each one is
+# guarded so it is a no-op on an already-correct schema.
+SCHEMA_VERSION = 3
+
+# Columns added by the v2 hash-chain migration, with their affinities. seq must
+# be INTEGER: under TEXT affinity SQLite would store 10 as '10' and order it
+# before 9.
+_V2_CHAIN_COLUMNS = {
+    "seq": "INTEGER",
+    "prev_hash": "TEXT",
+    "entry_hash": "TEXT",
+    "headers_sha256": "TEXT",
+    "body_excerpt_sha256": "TEXT",
+}
+
+# Columns added by the v3 retention migration.
+_V3_RETENTION_COLUMNS = {
+    "pruned_at": "TEXT",
+    "pruned_fields": "TEXT",
+    "legal_hold": "INTEGER NOT NULL DEFAULT 0",
+}
+
+# Text columns retention clears, paired with the digest column that keeps the
+# chain verifiable once the text is gone.
+PRUNABLE_CONTENT = (("body_excerpt", "body_excerpt_sha256"), ("headers_json", "headers_sha256"))
 # Cap stored request bodies at 100 KB. The proxy still forwards the full body;
 # this only bounds what lands in the audit DB. ``body_hash`` covers the whole
 # body for integrity, ``req_bytes`` records the true size. Bigger than the old
@@ -61,42 +93,158 @@ class RequestRecord:
 
 _INSERT_COLUMNS = (
     "ts, tool, method, scheme, host, path, req_bytes, resp_bytes, status, "
-    "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement"
+    "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement, "
+    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256"
 )
-_INSERT_PLACEHOLDERS = ", ".join("?" * 14)
+_INSERT_PLACEHOLDERS = ", ".join("?" * 19)
+
+
+class ReadOnlyStoreError(RuntimeError):
+    """Raised when a write is attempted on a store opened read-only."""
+
+
+@dataclass(frozen=True)
+class PruneResult:
+    """What a retention pass actually did."""
+
+    bodies_cleared: int
+    records_deleted: int
+    gap_seq_start: int | None = None
+    gap_seq_end: int | None = None
+
+
+@dataclass(frozen=True)
+class ChainVerification:
+    """Outcome of verifying the hash chain.
+
+    ``status`` is ``ok``, ``broken``, or ``empty``. ``unchained`` counts rows
+    written before v0.2, which carry no ``seq`` and are outside the chain: they
+    are not a failure, but an export must disclose them.
+    """
+
+    status: str
+    checked: int
+    unchained: int
+    first_seq: int | None
+    last_seq: int | None
+    head_hash: str
+    broken_at: int | None = None
+    detail: str | None = None
+    # Entries whose text columns were cleared by retention. Their digests are
+    # still chained, so the chain verifies, but the content behind those
+    # digests can no longer be checked and the count must be disclosed.
+    content_unavailable: int = 0
+    # Entries removed by a recorded retention deletion. Verification resumes
+    # across those gaps, but an export must disclose them: the surviving chain
+    # says nothing about what was in the deleted range.
+    entries_deleted: int = 0
 
 
 class Store:
-    """SQLite audit-log store. Open is idempotent."""
+    """SQLite audit-log store. Open is idempotent.
 
-    def __init__(self, path: Path | None = None) -> None:
+    Pass ``read_only=True`` for reader processes (the dashboard). The hash
+    chain is only sound with a single writer, and a stray write from a second
+    process produces a break indistinguishable from tampering.
+    """
+
+    def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
         # Resolve at call time so tests can monkeypatch DEFAULT_DB_PATH.
         resolved = path if path is not None else DEFAULT_DB_PATH
         self.path = resolved
+        self._read_only = read_only
         resolved.parent.mkdir(parents=True, exist_ok=True)
+        # Before connect: connecting creates the file.
+        already_existed = resolved.exists()
         self._conn = sqlite3.connect(resolved, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        if read_only:
+            # A reader must not migrate an existing database. Doing that (as
+            # this once did) made the dashboard a second writer against a chain
+            # that is only sound with one, and put a schema upgrade of real user
+            # data in the process least equipped to perform it.
+            #
+            # Creating an absent one is a different thing: there is no user data
+            # to upgrade and no other writer yet, and without it a dashboard
+            # started before the proxy on a fresh machine fails every query with
+            # "no such table: requests".
+            if not already_existed:
+                self._init_schema()
+                self._migrate()
+                self._enable_wal()
+            self._conn.execute("PRAGMA query_only = 1")
+            harden_path_permissions(resolved)
+            return
         self._init_schema()
-        self._migrate_enforcement_column()
+        self._migrate()
         self._enable_wal()
+        # After WAL: enabling it creates the -wal and -shm files, which hold
+        # recently written rows and need the same mode as the database.
+        harden_path_permissions(resolved)
 
     def _init_schema(self) -> None:
         schema = resources.files("upbox.db").joinpath("schema.sql").read_text()
         self._conn.executescript(schema)
 
-    def _migrate_enforcement_column(self) -> None:
+    def _migrate(self) -> None:
+        """Bring an existing database to ``SCHEMA_VERSION``.
+
+        A fresh database is already at the final shape, but reports version 0
+        (no ``schema_version`` row) and runs every step. Each step is therefore
+        guarded so it is a no-op when the schema is already correct.
+        """
+        version = self._schema_version()
+        if version < 1:
+            self._migrate_v1_enforcement()
+        if version < 2:
+            self._migrate_v2_chain()
+        if version < 3:
+            self._migrate_v3_retention()
+        self._conn.execute(
+            "INSERT INTO schema_version (id, version) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
+            (SCHEMA_VERSION,),
+        )
+
+    def _schema_version(self) -> int:
+        row = self._conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def _request_columns(self) -> set[str]:
+        return {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+
+    def _migrate_v1_enforcement(self) -> None:
         # Databases created before the warn/block split have a boolean
         # ``blocked`` column but no ``enforcement``. ``CREATE TABLE IF NOT
         # EXISTS`` leaves them untouched, so add the column here or inserts
         # referencing ``enforcement`` would fail. Old ``blocked=1`` rows
         # conflated warn + block; backfill them to 'flagged' since the shipped
         # default only ever produced warns (forwarded), not real 403s.
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+        columns = self._request_columns()
         if "enforcement" in columns:
             return
         self._conn.execute("ALTER TABLE requests ADD COLUMN enforcement TEXT")
         if "blocked" in columns:
             self._conn.execute("UPDATE requests SET enforcement = 'flagged' WHERE blocked = 1")
+
+    def _migrate_v2_chain(self) -> None:
+        # Chain columns stay NULL on pre-v0.2 rows. Backfilling them would
+        # produce a chain over rows that were freely editable before the chain
+        # existed, which proves nothing and misleads anyone who verifies it.
+        columns = self._request_columns()
+        for name, affinity in _V2_CHAIN_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {affinity}")
+        # Created here rather than in schema.sql: on a v0.1 database the seq
+        # column does not exist when schema.sql runs. NULLs are exempt from
+        # UNIQUE in SQLite, so unchained rows coexist fine.
+        self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_seq ON requests(seq)")
+
+    def _migrate_v3_retention(self) -> None:
+        columns = self._request_columns()
+        for name, definition in _V3_RETENTION_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
 
     def _enable_wal(self) -> None:
         row = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
@@ -107,29 +255,434 @@ class Store:
             raise RuntimeError(f"failed to enable WAL mode (got {actual!r})")
 
     def insert_request(self, record: RequestRecord) -> int:
-        cursor = self._conn.execute(
-            f"INSERT INTO requests ({_INSERT_COLUMNS}) VALUES ({_INSERT_PLACEHOLDERS})",
-            (
-                record.ts,
-                record.tool,
-                record.method,
-                record.scheme,
-                record.host,
-                record.path,
-                record.req_bytes,
-                record.resp_bytes,
-                record.status,
-                record.headers_json,
-                record.body_excerpt,
-                record.body_hash,
-                record.redactions_applied_json,
-                record.enforcement,
-            ),
-        )
+        """Append one request, linking it into the hash chain.
+
+        The row insert and the chain-head advance are one transaction: a crash
+        between them would otherwise leave the head pointing at an entry that
+        is not in the log, which reads as tampering.
+        """
+        headers_sha256 = chain.hash_text(record.headers_json)
+        body_excerpt_sha256 = chain.hash_text(record.body_excerpt)
+        with self._write_transaction():
+            seq, prev_hash = self._chain_head()
+            entry_hash = chain.entry_hash(
+                {
+                    "seq": seq,
+                    "ts": record.ts,
+                    "tool": record.tool,
+                    "method": record.method,
+                    "scheme": record.scheme,
+                    "host": record.host,
+                    "path": record.path,
+                    "req_bytes": record.req_bytes,
+                    "resp_bytes": record.resp_bytes,
+                    "status": record.status,
+                    "headers_sha256": headers_sha256,
+                    "body_hash": record.body_hash,
+                    "body_excerpt_sha256": body_excerpt_sha256,
+                    "redactions_applied_json": record.redactions_applied_json,
+                    "enforcement": record.enforcement,
+                    "prev_hash": prev_hash,
+                }
+            )
+            cursor = self._conn.execute(
+                f"INSERT INTO requests ({_INSERT_COLUMNS}) VALUES ({_INSERT_PLACEHOLDERS})",
+                (
+                    record.ts,
+                    record.tool,
+                    record.method,
+                    record.scheme,
+                    record.host,
+                    record.path,
+                    record.req_bytes,
+                    record.resp_bytes,
+                    record.status,
+                    record.headers_json,
+                    record.body_excerpt,
+                    record.body_hash,
+                    record.redactions_applied_json,
+                    record.enforcement,
+                    seq,
+                    prev_hash,
+                    entry_hash,
+                    headers_sha256,
+                    body_excerpt_sha256,
+                ),
+            )
+            self._conn.execute(
+                "UPDATE chain_state SET next_seq = ?, head_hash = ? WHERE id = 1",
+                (seq + 1, entry_hash),
+            )
         rowid = cursor.lastrowid
         if rowid is None:
             raise RuntimeError("insert returned no rowid")
         return rowid
+
+    @contextmanager
+    def _write_transaction(self) -> Iterator[None]:
+        if self._read_only:
+            raise ReadOnlyStoreError(f"{self.path} is open read-only")
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
+    def _chain_head(self) -> tuple[int, str]:
+        """Return ``(next_seq, head_hash)``, seeding genesis on first use.
+
+        Must be called inside ``_write_transaction``.
+        """
+        row = self._conn.execute(
+            "SELECT next_seq, head_hash FROM chain_state WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            self._conn.execute(
+                "INSERT INTO chain_state (id, next_seq, head_hash) VALUES (1, 1, ?)",
+                (chain.GENESIS_PREV_HASH,),
+            )
+            return 1, chain.GENESIS_PREV_HASH
+        return int(row["next_seq"]), str(row["head_hash"])
+
+    def head_hash(self) -> str:
+        """Current chain head, or the genesis value if nothing is chained yet."""
+        row = self._conn.execute("SELECT head_hash FROM chain_state WHERE id = 1").fetchone()
+        return str(row["head_hash"]) if row is not None else chain.GENESIS_PREV_HASH
+
+    def write_checkpoint(self, reason: str) -> sqlite3.Row:
+        """Seal the current head into ``chain_checkpoints`` and return the row.
+
+        A checkpoint only proves anything once its ``head_hash`` has left the
+        machine, so callers should surface the value rather than just storing
+        it.
+        """
+        with self._write_transaction():
+            next_seq, head = self._chain_head()
+            cursor = self._conn.execute(
+                "INSERT INTO chain_checkpoints (ts, seq_end, head_hash, entry_count, reason) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    datetime.now(UTC).isoformat(),
+                    next_seq - 1,
+                    head,
+                    self._chained_row_count(),
+                    reason,
+                ),
+            )
+            checkpoint_id = cursor.lastrowid
+        row = self._conn.execute(
+            "SELECT * FROM chain_checkpoints WHERE id = ?", (checkpoint_id,)
+        ).fetchone()
+        return cast("sqlite3.Row", row)
+
+    def preview_prune(self, policy: RetentionPolicy, now: datetime | None = None) -> PruneResult:
+        """Count what ``prune`` would remove, changing nothing."""
+        moment = now if now is not None else datetime.now(UTC)
+        body_cutoff = policy.body_cutoff(moment)
+        record_cutoff = policy.record_cutoff(moment)
+
+        bodies = 0
+        if body_cutoff is not None:
+            bodies = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM requests "
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    (body_cutoff.isoformat(),),
+                ).fetchone()[0]
+            )
+
+        records = 0
+        first: int | None = None
+        last: int | None = None
+        if record_cutoff is not None:
+            records = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM requests WHERE seq IS NULL AND ts < ? AND legal_hold = 0",
+                    (record_cutoff.isoformat(),),
+                ).fetchone()[0]
+            )
+            # Mirrors _delete_records_before: only the contiguous run from the
+            # oldest chained entry is deletable, and a legal hold stops it.
+            for row in self._conn.execute(
+                "SELECT seq, legal_hold, ts FROM requests WHERE seq IS NOT NULL ORDER BY seq"
+            ):
+                if row["legal_hold"] or row["ts"] >= record_cutoff.isoformat():
+                    break
+                if first is None:
+                    first = int(row["seq"])
+                last = int(row["seq"])
+                records += 1
+
+        return PruneResult(
+            bodies_cleared=bodies,
+            records_deleted=records,
+            gap_seq_start=first,
+            gap_seq_end=last,
+        )
+
+    def prune(self, policy: RetentionPolicy, now: datetime | None = None) -> PruneResult:
+        """Apply a retention policy. Returns what it did without printing.
+
+        Bodies are cleared first, then whole rows are deleted, so a row that
+        crosses both cutoffs in the same pass is not counted twice. Rows under
+        ``legal_hold`` are exempt from both tiers.
+        """
+        moment = now if now is not None else datetime.now(UTC)
+        stamp = moment.isoformat()
+
+        bodies_cleared = 0
+        records_deleted = 0
+        gap: sqlite3.Row | None = None
+
+        body_cutoff = policy.body_cutoff(moment)
+        record_cutoff = policy.record_cutoff(moment)
+
+        with self._write_transaction():
+            if body_cutoff is not None:
+                cleared_columns = json.dumps([text for text, _ in PRUNABLE_CONTENT])
+                cursor = self._conn.execute(
+                    "UPDATE requests SET body_excerpt = NULL, headers_json = NULL, "
+                    "pruned_at = ?, pruned_fields = ? "
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    (stamp, cleared_columns, body_cutoff.isoformat()),
+                )
+                bodies_cleared = cursor.rowcount
+
+            if record_cutoff is not None:
+                # Unchained rows first. They predate v0.2, so they are the
+                # oldest rows in the database and the ones still holding
+                # credentials from the header-storage bug. Excluding them from
+                # retention, as this once did, meant the data most in need of
+                # deletion was the only data kept forever. They carry no seq, so
+                # removing them leaves no gap and needs no gap record.
+                unchained_deleted = self._delete_unchained_before(record_cutoff)
+                gap = self._delete_records_before(record_cutoff, stamp)
+                records_deleted = unchained_deleted + (
+                    int(gap["entry_count"]) if gap is not None else 0
+                )
+
+        return PruneResult(
+            bodies_cleared=bodies_cleared,
+            records_deleted=records_deleted,
+            gap_seq_start=int(gap["seq_start"]) if gap is not None else None,
+            gap_seq_end=int(gap["seq_end"]) if gap is not None else None,
+        )
+
+    def _delete_unchained_before(self, cutoff: datetime) -> int:
+        """Delete pre-v0.2 rows older than ``cutoff``. Returns rows removed.
+
+        These sit outside the chain, so there is nothing to link across and no
+        gap record to write. Legal holds still apply.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM requests WHERE seq IS NULL AND ts < ? AND legal_hold = 0",
+            (cutoff.isoformat(),),
+        )
+        return cursor.rowcount
+
+    def _delete_records_before(self, cutoff: datetime, stamp: str) -> sqlite3.Row | None:
+        """Delete chained rows older than ``cutoff`` and record the gap.
+
+        Only a contiguous run from the oldest surviving entry is deletable. A
+        legal hold in the middle of the range stops the run there rather than
+        punching a second hole, because each hole needs its own gap record and
+        a hold is a signal to stop pruning, not to prune around.
+        """
+        candidates = list(
+            self._conn.execute(
+                "SELECT seq, entry_hash, legal_hold, ts FROM requests "
+                "WHERE seq IS NOT NULL ORDER BY seq"
+            )
+        )
+        deletable: list[sqlite3.Row] = []
+        for row in candidates:
+            if row["legal_hold"] or row["ts"] >= cutoff.isoformat():
+                break
+            deletable.append(row)
+        if not deletable:
+            return None
+
+        seq_start = int(deletable[0]["seq"])
+        seq_end = int(deletable[-1]["seq"])
+        self._conn.execute("DELETE FROM requests WHERE seq BETWEEN ? AND ?", (seq_start, seq_end))
+        cursor = self._conn.execute(
+            "INSERT INTO chain_gaps (ts, seq_start, seq_end, entry_count, last_entry_hash, reason) "
+            "VALUES (?, ?, ?, ?, ?, 'retention')",
+            (stamp, seq_start, seq_end, len(deletable), str(deletable[-1]["entry_hash"])),
+        )
+        row = self._conn.execute(
+            "SELECT * FROM chain_gaps WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
+        return cast("sqlite3.Row | None", row)
+
+    def set_legal_hold(
+        self, since: str | None = None, until: str | None = None, *, held: bool = True
+    ) -> int:
+        """Exempt a timestamp range from retention. Returns rows affected."""
+        clauses: list[str] = []
+        params: list[Any] = [1 if held else 0]
+        if since:
+            clauses.append("ts >= ?")
+            params.append(since)
+        if until:
+            clauses.append("ts <= ?")
+            params.append(until)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._write_transaction():
+            cursor = self._conn.execute(
+                f"UPDATE requests SET legal_hold = ? {where}", tuple(params)
+            )
+        return cursor.rowcount
+
+    def _gaps_by_start(self) -> dict[int, sqlite3.Row]:
+        return {
+            int(row["seq_start"]): row
+            for row in self._conn.execute("SELECT * FROM chain_gaps ORDER BY seq_start")
+        }
+
+    def _chained_row_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM requests WHERE seq IS NOT NULL").fetchone()
+        return int(row[0])
+
+    def verify_chain(self) -> ChainVerification:
+        """Recompute every chained entry and check its linkage.
+
+        Detects edited content, deleted rows (seq gaps), inserted or reordered
+        rows (linkage breaks), and a stored head that disagrees with the log.
+        Stops at the first break, since everything after it is unverifiable.
+        """
+        unchained = int(
+            self._conn.execute("SELECT COUNT(*) FROM requests WHERE seq IS NULL").fetchone()[0]
+        )
+        rows = self._conn.execute("SELECT * FROM requests WHERE seq IS NOT NULL ORDER BY seq")
+
+        gaps = self._gaps_by_start()
+        expected_prev = chain.GENESIS_PREV_HASH
+        expected_seq = 1
+        checked = 0
+        content_unavailable = 0
+        entries_deleted = 0
+        first_seq: int | None = None
+        last_seq: int | None = None
+
+        def broken(seq: int | None, detail: str) -> ChainVerification:
+            return ChainVerification(
+                status="broken",
+                checked=checked,
+                unchained=unchained,
+                first_seq=first_seq,
+                last_seq=last_seq,
+                head_hash=self.head_hash(),
+                broken_at=seq,
+                detail=detail,
+                content_unavailable=content_unavailable,
+                entries_deleted=entries_deleted,
+            )
+
+        def skip_recorded_gaps(stop_at: int | None) -> str | None:
+            """Advance across recorded retention gaps. Returns a reason on failure.
+
+            A gap is only acceptable where a retention deletion recorded both its
+            range and the hash of the last entry it removed, which is what lets
+            linkage resume. An unrecorded gap is tampering.
+
+            Successive retention passes leave adjacent gaps (1-2, then 3-4), so
+            this consumes as many as line up rather than one per row. A row with
+            ``seq_end < seq_start`` would make ``expected_seq`` cycle forever, so
+            it is rejected outright: nothing legitimate writes one, and a forged
+            one must not be able to hang the verifier instead of failing it.
+            """
+            nonlocal expected_prev, expected_seq, entries_deleted
+            while expected_seq in gaps and expected_seq != stop_at:
+                gap = gaps[expected_seq]
+                end = int(gap["seq_end"])
+                if end < expected_seq:
+                    return f"malformed retention gap record at seq {expected_seq}"
+                expected_prev = str(gap["last_entry_hash"])
+                # Derived from the range, not read from entry_count: a forged
+                # count would otherwise inflate what the export discloses.
+                entries_deleted += end - expected_seq + 1
+                expected_seq = end + 1
+            return None
+
+        for row in rows:
+            seq = int(row["seq"])
+            if first_seq is None:
+                first_seq = seq
+            if seq != expected_seq:
+                failure = skip_recorded_gaps(seq)
+                if failure is not None:
+                    return broken(seq, failure)
+            if seq != expected_seq:
+                return broken(seq, f"sequence gap: expected seq {expected_seq}, found {seq}")
+            if row["prev_hash"] != expected_prev:
+                return broken(seq, f"seq {seq} does not link to the previous entry")
+            recomputed = chain.entry_hash(chain.chain_payload(_row_to_dict(row)))
+            if recomputed != row["entry_hash"]:
+                return broken(seq, f"seq {seq} does not match its recorded hash")
+
+            # The chain commits to the digests, so a digest column that no
+            # longer describes its text column would otherwise slip through:
+            # an attacker could rewrite a prompt body and leave the hash alone.
+            # A null text column is retention having cleared it, which is
+            # legitimate but leaves the content uncheckable.
+            for text_column, digest_column in (
+                ("body_excerpt", "body_excerpt_sha256"),
+                ("headers_json", "headers_sha256"),
+            ):
+                if row[text_column] is None:
+                    if row[digest_column] is not None:
+                        content_unavailable += 1
+                    continue
+                if chain.hash_text(row[text_column]) != row[digest_column]:
+                    return broken(seq, f"seq {seq} {text_column} does not match its stored digest")
+
+            expected_prev = str(row["entry_hash"])
+            expected_seq = seq + 1
+            last_seq = seq
+            checked += 1
+
+        # Trailing gaps, including the case where retention removed every entry.
+        # This must run before the stored-head comparison below, or a full prune
+        # looks like a head that disagrees with the log.
+        failure = skip_recorded_gaps(None)
+        if failure is not None:
+            return broken(last_seq, failure)
+
+        stored_head = self.head_hash()
+        if stored_head != expected_prev:
+            # Reached with checked == 0 when every chained row was deleted
+            # without a covering gap record. Returning "empty" here (as this
+            # once did) reported a wiped log as a fresh one, which is the
+            # easiest possible attack and the one the chain exists to catch.
+            return broken(
+                last_seq,
+                "stored chain head does not match the end of the log (entries removed?)",
+            )
+
+        if checked == 0:
+            return ChainVerification(
+                status="empty",
+                checked=0,
+                unchained=unchained,
+                first_seq=None,
+                last_seq=None,
+                head_hash=stored_head,
+                entries_deleted=entries_deleted,
+            )
+
+        return ChainVerification(
+            status="ok",
+            checked=checked,
+            unchained=unchained,
+            first_seq=first_seq,
+            last_seq=last_seq,
+            head_hash=stored_head,
+            content_unavailable=content_unavailable,
+            entries_deleted=entries_deleted,
+        )
 
     def query_recent(self, limit: int = 100) -> list[sqlite3.Row]:
         return list(
@@ -288,6 +841,15 @@ def truncate_body_excerpt(body: bytes | str | None) -> str | None:
         return None
     raw = body if isinstance(body, bytes) else body.encode("utf-8", "replace")
     return raw[:BODY_EXCERPT_MAX].decode("utf-8", "replace")
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """Materialise a row as a name-keyed dict.
+
+    ``dict(row)`` does not work: ``sqlite3.Row`` iterates over values, not
+    keys, so the ``.keys()`` call is load-bearing rather than redundant.
+    """
+    return {key: row[key] for key in row.keys()}  # noqa: SIM118
 
 
 def _csv_fieldnames() -> list[str]:

@@ -1,0 +1,31 @@
+# Audit-log retention policy. Copy to ~/.upbox/rules/retention.yaml to change it.
+#
+# Two tiers, because bodies and metadata carry different risk.
+#
+# body_days
+#   Clear the stored request body and headers after this many days, keeping the
+#   row. This is the chain-safe tier: the hash chain commits to digests of those
+#   columns, not their text, so clearing them leaves `upbox verify` passing. The
+#   row still proves a request of a given size went to a given host at a given
+#   time with a body that hashed to a given value. Set to null to keep bodies.
+#
+# record_days
+#   Delete whole rows after this many days. This cannot be done without leaving
+#   a gap in the chain, so every deletion is recorded in chain_gaps with the
+#   hash of the last entry removed. `upbox verify` then resumes across the gap
+#   and reports it as a retention deletion rather than as tampering. Set to null
+#   to keep rows forever, which is the default.
+#
+# min_record_days
+#   Soft floor. Setting record_days below it warns and proceeds. How long to
+#   keep an audit log is your decision as controller, not upbox's.
+#
+# Bodies are where personal data almost always is, so they go first. GDPR
+# Article 5(1)(e) storage limitation pushes these numbers down; wanting evidence
+# later pushes them up.
+#
+# Exempt a range from every pass with:  upbox hold --since ... --until ...
+
+body_days: 7
+record_days: null
+min_record_days: 180

@@ -90,13 +90,24 @@ buried by your other posts:
 
 ## v0.2 cadence
 
-Right after launch ship the compliance lens (~16 days to 1 August):
+The original plan was to ship a compliance lens on the eve of AI Act
+enforcement, 1 August 2026. That framing died on 24 July 2026 when
+Regulation (EU) 2026/1744 deferred the high-risk deployer obligations to
+2 December 2027 and 2 August 2028. See `ROADMAP.md`.
 
-1. Article 26 export format
-2. Tamper-evident hash chain
-3. Encrypted-at-rest SQLite
-4. Team mode (basic)
-5. Windows CA auto-install
-6. Live-reload of rule files
+What v0.2 actually ships:
 
-Same launch arc on the eve of EU AI Act enforcement.
+1. Auth-header redaction (security fix, landed first)
+2. Tamper-evident hash chain plus `upbox verify` / `upbox checkpoint`
+3. `upbox.audit.v1` export format
+4. Configurable retention with chain-safe pruning
+5. At-rest hardening plus `upbox doctor` (no in-app encryption, by design)
+6. TLS-interception exclusion list
+
+Deferred: encrypted-at-rest SQLite (cut, not postponed), team mode,
+Windows Firefox NSS auto-install.
+
+Launch angle: lead with the correction, not the deadline. "The AI Act
+deadline moved 16 months, here is what actually applies today, and here is
+what we changed" is a stronger and more honest post than the one originally
+planned.

@@ -52,6 +52,12 @@ def run(
     for h in extra_allow_hosts:
         proxy_args.extend(["--allow", h])
 
+    # Create and migrate the database here, before either child exists. The
+    # dashboard opens it read-only and will not migrate it, so leaving this to
+    # the proxy would race: on an existing v0.1 database the dashboard could
+    # open first and fail every query until the proxy caught up.
+    _initialise_database()
+
     try:
         proxy_proc = _spawn(proxy_args)
         dashboard_proc = _spawn(["dashboard", "--port", str(dashboard_port)])
@@ -84,6 +90,13 @@ def run(
             time.sleep(POLL_INTERVAL)
     finally:
         PID_FILE.unlink(missing_ok=True)
+
+
+def _initialise_database() -> None:
+    """Open the store once as a writer so the schema exists and is current."""
+    from upbox.db.store import Store
+
+    Store().close()
 
 
 def _spawn(args: list[str]) -> subprocess.Popen[bytes]:

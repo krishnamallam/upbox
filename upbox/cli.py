@@ -214,27 +214,242 @@ def _yn(value: bool | None) -> str:
 
 
 @app.command()
+def verify() -> None:
+    """Recompute the audit-log hash chain and report whether it holds.
+
+    Exit code 0 if the chain verifies (or is empty), 1 if it is broken.
+    """
+    from upbox.db.store import Store
+
+    with Store() as store:
+        result = store.verify_chain()
+
+    if result.status == "empty":
+        typer.echo("Chain is empty: no requests captured since the chain was introduced.")
+    elif result.status == "ok":
+        typer.echo(f"Chain OK: {result.checked} entries, seq {result.first_seq}-{result.last_seq}.")
+    else:
+        where = f" at seq {result.broken_at}" if result.broken_at is not None else ""
+        typer.echo(f"Chain BROKEN{where}: {result.detail}", err=True)
+        typer.echo(f"Verified {result.checked} entries before the break.", err=True)
+
+    if result.unchained:
+        typer.echo(
+            f"{result.unchained} row(s) predate the chain and are not covered by it. "
+            "They were never backfilled on purpose."
+        )
+    if result.entries_deleted:
+        typer.echo(
+            f"{result.entries_deleted} entry/entries were deleted by retention. The chain "
+            "resumes across the recorded gap, but says nothing about what was removed."
+        )
+    if result.content_unavailable:
+        typer.echo(
+            f"{result.content_unavailable} stored body/header value(s) were cleared by "
+            "retention. Their digests still verify; the content cannot be re-checked."
+        )
+
+    typer.echo(f"Head: {result.head_hash}")
+    if result.status != "broken":
+        typer.echo(
+            "This proves the log is internally consistent, not that it is complete. "
+            "Record the head hash somewhere off this machine so truncation is detectable."
+        )
+        return
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def doctor() -> None:
+    """Report at-rest protection for the audit database, and chain health.
+
+    upbox does not encrypt its own database. This tells you whether the thing
+    that actually protects it, full-disk encryption, is switched on.
+    """
+    from upbox.atrest import (
+        DIR_MODE,
+        FILE_MODE,
+        harden_path_permissions,
+        path_mode,
+        volume_encryption_status,
+    )
+    from upbox.db.store import DEFAULT_DB_PATH, Store
+
+    db = DEFAULT_DB_PATH
+    typer.echo(f"Database: {db}")
+    typer.echo(f"  Exists:               {_yn(db.exists())}")
+
+    # Tighten before reporting, or the report shows modes it is about to fix
+    # itself when it opens the store below.
+    harden_path_permissions(db)
+    dir_mode = path_mode(db.parent)
+    file_mode = path_mode(db) if db.exists() else "n/a"
+    typer.echo(f"  Directory mode:       {dir_mode} (want {DIR_MODE:04o})")
+    typer.echo(f"  Database mode:        {file_mode} (want {FILE_MODE:04o})")
+
+    encryption = volume_encryption_status(db.parent)
+    typer.echo("")
+    typer.echo("At rest:")
+    typer.echo(f"  Volume encryption:    {encryption.state.upper()} ({encryption.detail})")
+    typer.echo("  upbox in-app crypto:  NONE, by design (see the At rest section of the README)")
+    if encryption.is_encrypted is False:
+        typer.echo(
+            "  ACTION: the audit log contains prompt bodies. Turn on full-disk encryption.",
+        )
+
+    if db.exists():
+        with Store(db, read_only=True) as store:
+            result = store.verify_chain()
+        typer.echo("")
+        typer.echo("Audit log:")
+        typer.echo(f"  Chain:                {result.status.upper()}")
+        typer.echo(f"  Entries verified:     {result.checked}")
+        typer.echo(f"  Head:                 {result.head_hash}")
+
+
+@app.command()
+def prune(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would go, change nothing."),
+) -> None:
+    """Apply the retention policy from ~/.upbox/rules/retention.yaml."""
+    from upbox.db.store import Store
+    from upbox.retention import load_policy
+
+    policy = load_policy()
+    typer.echo(
+        f"Policy: body_days={policy.body_days}, record_days={policy.record_days}"
+        f" (min_record_days={policy.min_record_days})"
+    )
+    for note in policy.warnings():
+        typer.echo(f"warning: {note}", err=True)
+
+    if dry_run:
+        with Store() as store:
+            preview = store.preview_prune(policy)
+        typer.echo(f"Would clear bodies on {preview.bodies_cleared} row(s).")
+        if preview.records_deleted:
+            typer.echo(
+                f"Would delete {preview.records_deleted} row(s)"
+                + (
+                    f", chained seq {preview.gap_seq_start}-{preview.gap_seq_end}"
+                    if preview.gap_seq_start is not None
+                    else ""
+                )
+                + "."
+            )
+        typer.echo("--dry-run: nothing was changed.")
+        return
+
+    with Store() as store:
+        result = store.prune(policy)
+        typer.echo(f"Cleared bodies on {result.bodies_cleared} row(s).")
+        if result.records_deleted:
+            typer.echo(
+                f"Deleted {result.records_deleted} row(s), seq "
+                f"{result.gap_seq_start}-{result.gap_seq_end}. Recorded as a chain gap so "
+                "verification reports it as a retention deletion, not tampering."
+            )
+        row = store.write_checkpoint("prune")
+        typer.echo(f"Head after prune: {row['head_hash']}")
+
+
+@app.command()
+def hold(
+    since: str = typer.Option("", help="Hold rows with ts >= this ISO timestamp."),
+    until: str = typer.Option("", help="Hold rows with ts <= this ISO timestamp."),
+    release: bool = typer.Option(False, "--release", help="Lift the hold instead of setting it."),
+) -> None:
+    """Exempt a time range from retention, for a live dispute or investigation."""
+    from upbox.db.store import Store
+
+    # Bounds are compared as strings against stored ISO timestamps, so a
+    # date-only bound like "2026-07-01" silently excludes every row from that
+    # same day (their "2026-07-01T09:00:00" sorts after it). Normalise instead
+    # of holding the wrong rows in a dispute.
+    since_ts = _normalise_bound(since, end_of_day=False)
+    until_ts = _normalise_bound(until, end_of_day=True)
+
+    with Store() as store:
+        affected = store.set_legal_hold(since_ts, until_ts, held=not release)
+    verb = "released" if release else "held"
+    typer.echo(f"{verb} {affected} row(s).")
+
+
+def _normalise_bound(value: str, *, end_of_day: bool) -> str | None:
+    """Validate an ISO timestamp bound, widening a bare date to cover the day."""
+    if not value:
+        return None
+    from datetime import date, datetime
+
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            typer.echo(f"not an ISO date or timestamp: {value!r}", err=True)
+            raise typer.Exit(code=2) from None
+        return f"{value}T23:59:59.999999" if end_of_day else f"{value}T00:00:00"
+    return value
+
+
+@app.command()
+def checkpoint(
+    reason: str = typer.Option("manual", help="Why this checkpoint was taken."),
+    output: str = typer.Option("", "-o", help="Also write the head hash to this file."),
+) -> None:
+    """Seal the current chain head so later truncation becomes detectable."""
+    from pathlib import Path
+
+    from upbox.db.store import Store
+
+    with Store() as store:
+        row = store.write_checkpoint(reason)
+
+    typer.echo(f"Checkpoint {row['id']} at seq {row['seq_end']} ({row['entry_count']} entries)")
+    typer.echo(f"Head: {row['head_hash']}")
+    if output:
+        Path(output).write_text(f"{row['ts']} seq={row['seq_end']} {row['head_hash']}\n")
+        typer.echo(f"wrote {output}")
+    typer.echo(
+        "A checkpoint only proves anything once this hash has left the machine. "
+        "Mail it to yourself, commit it, or have it timestamped."
+    )
+
+
+@app.command()
 def export(
-    fmt: str = typer.Option("jsonl", "--format", help="jsonl or csv."),
+    fmt: str = typer.Option("jsonl", "--format", help="audit, jsonl, or csv."),
     output: str = typer.Option("-", "-o", help="Output path; - for stdout."),
     since: str = typer.Option("", help="Only rows with ts >= this ISO timestamp."),
     until: str = typer.Option("", help="Only rows with ts <= this ISO timestamp."),
     tool: str = typer.Option("", help="Only rows for this tool name."),
 ) -> None:
-    """Export the audit log to JSON Lines or CSV."""
+    """Export the audit log.
+
+    ``audit`` writes upbox.audit.v1: newline-delimited JSON carrying the ruleset
+    digests, the hash-chain verification result, and an explicit coverage
+    statement, so the file stands on its own. ``jsonl`` and ``csv`` are the flat
+    v0.1 dumps, kept for spreadsheets and existing scripts.
+    """
     import sqlite3
     import sys
     from collections.abc import Iterable
     from pathlib import Path
     from typing import IO
 
+    from upbox.audit_export import write_audit_v1
     from upbox.db.store import Store
 
-    if fmt not in {"jsonl", "csv"}:
-        typer.echo(f"unknown format: {fmt!r} (expected jsonl or csv)", err=True)
+    if fmt not in {"audit", "jsonl", "csv"}:
+        typer.echo(f"unknown format: {fmt!r} (expected audit, jsonl, or csv)", err=True)
         raise typer.Exit(code=2)
 
     def _write(sink: IO[str], rows: Iterable[sqlite3.Row]) -> int:
+        if fmt == "audit":
+            return write_audit_v1(
+                store, sink, since=since or None, until=until or None, tool=tool or None
+            )
         if fmt == "jsonl":
             return store.export_jsonl(sink, rows)
         return store.export_csv(sink, rows)

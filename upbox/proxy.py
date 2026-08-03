@@ -21,6 +21,8 @@ from upbox.addons.enforce import EnforceAddon
 from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
 from upbox.db.store import Store
+from upbox.no_intercept import load_no_intercept_patterns
+from upbox.retention import RetentionRunner
 from upbox.watch import RuleReloadWatcher, build_rule_watch_targets
 
 # Curated AI-tool process list for `upbox start`'s default LocalMode spec.
@@ -146,6 +148,20 @@ async def _run(
         "confdir": str(confdir),
         "mode": mode,
     }
+
+    # Applied before and independently of the allowlist: these destinations are
+    # never decrypted, even under --capture-all. mitmproxy tunnels ignore_hosts
+    # matches without generating a certificate or reading a body.
+    no_intercept = load_no_intercept_patterns()
+    if no_intercept:
+        opt_kwargs["ignore_hosts"] = no_intercept
+        print(
+            f"upbox: {len(no_intercept)} destination patterns will never be decrypted "
+            "(banking, health, webmail, government, identity providers). "
+            "Edit ~/.upbox/rules/no_intercept.yaml to extend.",
+            flush=True,
+        )
+
     if use_allowlist:
         # Derive the TLS allowlist from tools.yaml. Pinned-cert apps
         # (login.live.com, Teams, banking) and OS noise pass through
@@ -178,6 +194,7 @@ async def _run(
         redact,
         CaptureAddon(store),
         RuleReloadWatcher(build_rule_watch_targets(fingerprint, redact, enforce)),
+        RetentionRunner(store),
     )
 
     try:
