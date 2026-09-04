@@ -7,11 +7,14 @@ erasure is disclosed rather than hidden.
 
 from __future__ import annotations
 
+import io
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from upbox.audit_export import write_audit_v1
 from upbox.db.store import EraseSelection, LegalHoldError, RequestRecord, Store
 from upbox.retention import RetentionPolicy
 
@@ -423,3 +426,47 @@ def test_chain_verifies_after_retention_removes_a_tombstone(tmp_store: Store) ->
     tmp_store.prune(RetentionPolicy(body_days=None, record_days=1), now=NOW - timedelta(hours=12))
 
     assert tmp_store.verify_chain().status == "ok"
+
+
+# --- export -------------------------------------------------------------------
+
+
+def _export(store: Store) -> list[dict[str, object]]:
+    sink = io.StringIO()
+    write_audit_v1(store, sink)
+    return [json.loads(line) for line in sink.getvalue().splitlines()]
+
+
+def test_export_includes_the_tombstone(tmp_store: Store) -> None:
+    _three_rows(tmp_store)
+    _erase_middle(tmp_store)
+
+    assert len(_export(tmp_store)) == 5
+
+
+def test_export_marks_the_tombstone_as_erased(tmp_store: Store) -> None:
+    _three_rows(tmp_store)
+    _erase_middle(tmp_store)
+
+    assert _export(tmp_store)[2]["erased"] == {"at": NOW.isoformat(), "reason": REASON}
+
+
+def test_export_live_record_reports_no_erasure(tmp_store: Store) -> None:
+    _three_rows(tmp_store)
+    _erase_middle(tmp_store)
+
+    assert _export(tmp_store)[1]["erased"] is None
+
+
+def test_export_tombstone_has_no_enforcement_meaning(tmp_store: Store) -> None:
+    _three_rows(tmp_store)
+    _erase_middle(tmp_store)
+
+    assert _export(tmp_store)[2]["enforcement_meaning"] is None
+
+
+def test_export_header_counts_erasures(tmp_store: Store) -> None:
+    _three_rows(tmp_store)
+    _erase_middle(tmp_store)
+
+    assert _export(tmp_store)[0]["chain"]["entries_erased_on_request"] == 1

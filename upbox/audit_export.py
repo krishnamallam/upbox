@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from upbox import __version__
-from upbox.addons import enforce, fingerprint, redact
+from upbox.addons import capture, enforce, fingerprint, redact
 from upbox.db import chain
 from upbox.db.store import BODY_EXCERPT_MAX, Store
 
@@ -90,12 +90,14 @@ class RulesetDigests:
     tools: str
     redact: str
     allowlist: str
+    capture: str
 
     def as_dict(self) -> dict[str, str]:
         return {
             "tools_sha256": self.tools,
             "redact_sha256": self.redact,
             "allowlist_sha256": self.allowlist,
+            "capture_sha256": self.capture,
         }
 
 
@@ -105,6 +107,7 @@ def ruleset_digests() -> RulesetDigests:
         tools=_digest_rule_file(fingerprint.USER_RULES_PATH, fingerprint.DEFAULT_RULES_RESOURCE),
         redact=_digest_rule_file(redact.USER_RULES_PATH, redact.DEFAULT_RULES_RESOURCE),
         allowlist=_digest_rule_file(enforce.USER_RULES_PATH, enforce.DEFAULT_RULES_RESOURCE),
+        capture=_digest_rule_file(capture.USER_RULES_PATH, capture.DEFAULT_RULES_RESOURCE),
     )
 
 
@@ -134,7 +137,7 @@ def write_audit_v1(
     formatting.
     """
     verification = store.verify_chain()
-    rows = store.query_filtered(since=since, until=until, tool=tool)
+    rows = store.query_filtered(since=since, until=until, tool=tool, include_erased=True)
 
     seqs = [int(row["seq"]) for row in rows if row["seq"] is not None]
     header = {
@@ -155,6 +158,8 @@ def write_audit_v1(
             "entries_verified": verification.checked,
             "entries_deleted_by_retention": verification.entries_deleted,
             "content_cleared_by_retention": verification.content_unavailable,
+            "content_omitted_by_capture_policy": store.omitted_content_count(),
+            "entries_erased_on_request": verification.entries_erased,
             "rows_predating_the_chain": verification.unchained,
             "broken_at_seq": verification.broken_at,
             "detail": verification.detail,
@@ -185,21 +190,34 @@ def _record(row: Any) -> dict[str, Any]:
     for name in RECORD_FIELDS:
         record[name] = row[name]
 
+    omitted = json.loads(row["omitted_fields"] or "null")
+    erased = row["erased_at"] is not None
+
     # Truncation is stated, not left for the reader to infer from a length.
-    # Three states, not two: a body cleared by retention is not an untruncated
-    # body, and reporting false for it would assert something never checked.
-    # The comparison is against BODY_EXCERPT_MAX rather than the excerpt's own
-    # length, because a non-UTF-8 body decodes with replacement characters that
-    # can be longer than the bytes they stand in for.
+    # Four states, not two: a body cleared by retention or never stored under
+    # the capture policy is not an untruncated body, and an erased row has no
+    # body to make claims about. Reporting false for any of them would assert
+    # something never checked. The comparison is against BODY_EXCERPT_MAX
+    # rather than the excerpt's own length, because a non-UTF-8 body decodes
+    # with replacement characters that can be longer than the bytes they
+    # stand in for.
     req_bytes = row["req_bytes"]
-    if row["body_excerpt"] is None:
-        record["body_truncated"] = None if row["body_excerpt_sha256"] is not None else False
+    if erased:
+        record["body_truncated"] = None
+    elif row["body_excerpt"] is None:
+        body_omitted = bool(omitted and "body_excerpt" in omitted)
+        record["body_truncated"] = (
+            None if (row["body_excerpt_sha256"] is not None or body_omitted) else False
+        )
     else:
         record["body_truncated"] = bool(req_bytes is not None and req_bytes > BODY_EXCERPT_MAX)
     record["redactions"] = json.loads(row["redactions_applied_json"] or "null")
     # 'flagged' reached the cloud. A reader scanning a column of statuses will
-    # assume otherwise unless it is spelled out per record.
-    record["enforcement_meaning"] = _enforcement_meaning(row["enforcement"])
+    # assume otherwise unless it is spelled out per record. A tombstone has no
+    # outcome left to explain.
+    record["enforcement_meaning"] = None if erased else _enforcement_meaning(row["enforcement"])
+    record["capture"] = {"omitted_fields": omitted}
+    record["erased"] = {"at": row["erased_at"], "reason": row["erased_reason"]} if erased else None
     record["retention"] = {
         "pruned_at": row["pruned_at"],
         "pruned_fields": json.loads(row["pruned_fields"] or "null"),

@@ -980,6 +980,13 @@ class Store:
             )
         )
 
+    def omitted_content_count(self) -> int:
+        """Live rows whose body or headers were never stored under the capture policy."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM requests WHERE omitted_fields IS NOT NULL AND erased_at IS NULL"
+        ).fetchone()
+        return int(row[0])
+
     def iter_all(self) -> Iterator[sqlite3.Row]:
         yield from self._conn.execute("SELECT * FROM requests WHERE erased_at IS NULL ORDER BY id")
 
