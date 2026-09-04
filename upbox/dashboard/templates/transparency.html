@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}upbox · transparency{% endblock %}
+
+{% block sidebar %}
+  {% include "partials/sidebar.html" %}
+{% endblock %}
+
+{% block main %}
+<div class="settings report">
+  <h2>What upbox holds about this machine's user</h2>
+  <p class="muted small">Generated {{ report.generated_at }} by upbox {{ report.upbox_version }} on <code>{{ report.hostname }}</code> for OS user <code>{{ report.os_user }}</code>. Database <code>{{ report.database_path }}</code>. Controller and contact: to be completed by the deployer.</p>
+
+  <h3>1. Purpose</h3>
+  <p>upbox is a deployer-side network observer. It records the requests that AI tools on this machine make to their cloud services, replaces secrets before forwarding, and keeps a tamper-evident audit log so you can see and control what left the machine. This page is not legal advice.</p>
+
+  <h3>2. Categories of data and whether they are stored</h3>
+  <table class="report-table">
+    <tr><th>Category</th><th>Stored</th></tr>
+    <tr><td>Timestamp of each request (host wall clock)</td><td>stored</td></tr>
+    <tr><td>Tool that made the request</td><td>stored</td></tr>
+    <tr><td>Destination host</td><td>stored</td></tr>
+    <tr><td>Path, with credential values in the query string removed</td><td>stored</td></tr>
+    <tr><td>Request and response sizes, HTTP status</td><td>stored</td></tr>
+    <tr><td>Request headers, credential values replaced by a marker</td><td>{{ 'stored' if report.capture_headers else 'not stored (capture policy)' }}</td></tr>
+    <tr><td>Request body excerpt, up to {{ report.body_excerpt_max | bytes }} after redaction</td><td>{{ 'stored' if report.capture_bodies else 'not stored (capture policy)' }}</td></tr>
+    <tr><td>SHA-256 of the full redacted body</td><td>stored</td></tr>
+    <tr><td>Redaction and allowlist outcomes</td><td>stored</td></tr>
+  </table>
+  <p class="muted small">Rows whose body or headers were never stored under the capture policy: {{ report.rows_with_omitted_content }}.</p>
+
+  <h3>3. Recipients</h3>
+  <p class="muted small">{{ report.total_rows }} request(s) recorded{% if report.first_ts %} between {{ report.first_ts }} and {{ report.last_ts }}{% endif %}, {{ report.total_req_bytes | bytes }} of request data in total.</p>
+  {% if report.recipients %}
+  <table class="report-table">
+    <tr><th>Tool</th><th>Host</th><th>Requests</th><th>Bytes</th><th>First seen</th><th>Last seen</th></tr>
+    {% for r in report.recipients %}
+    <tr><td>{{ r.tool }}</td><td>{{ r.host }}</td><td>{{ r.requests }}</td><td>{{ r.req_bytes | bytes }}</td><td>{{ r.first_seen }}</td><td>{{ r.last_seen }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">None recorded.</p>
+  {% endif %}
+
+  <h3>4. Retention</h3>
+  <ul>
+    <li>Bodies and headers are cleared after {{ report.body_days ~ ' day(s)' if report.body_days is not none else 'never (kept indefinitely)' }}.</li>
+    <li>Whole records are deleted after {{ report.record_days ~ ' day(s)' if report.record_days is not none else 'never (kept indefinitely)' }}.</li>
+    <li>Rows with content cleared by retention: {{ report.rows_with_pruned_content }}.</li>
+    <li>Entries deleted by retention (disclosed as chain gaps): {{ report.entries_deleted_by_retention }}.</li>
+    <li>Rows under legal hold: {{ report.rows_under_legal_hold }}.</li>
+  </ul>
+
+  <h3>5. Erasures on request</h3>
+  {% if report.erasures %}
+  <ul>
+    {% for e in report.erasures %}
+    <li>Request at {{ e.request_ts }}, erased {{ e.erased_at }}. Reason: {{ e.reason }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">None.</p>
+  {% endif %}
+
+  <h3>6. Integrity</h3>
+  <ul>
+    <li>Hash chain: {{ report.chain_status }}, {{ report.chain_checked }} entries recomputed, {{ report.chain_entries_erased }} erased entries linked through.</li>
+    <li>Chain head: <code>{{ report.chain_head_hash }}</code></li>
+    {% if report.last_checkpoint %}
+    <li>Last checkpoint: {{ report.last_checkpoint.ts }} at seq {{ report.last_checkpoint.seq_end }}, head <code>{{ report.last_checkpoint.head_hash }}</code></li>
+    {% else %}
+    <li>Last checkpoint: none. Run <code>upbox checkpoint</code> to seal the head.</li>
+    {% endif %}
+  </ul>
+
+  <h3>7. Your rights and how to exercise them</h3>
+  <ul>
+    <li>A copy of the records: <code>upbox export --format audit -o records.ndjson</code>, or <code>upbox report --records records.ndjson</code> for this page as a file plus the records.</li>
+    <li>Erasure of specific records: <code>upbox erase --id N --reason "..."</code>. Erasures are disclosed above and in every later export.</li>
+    <li>Shorter retention: <code>~/.upbox/rules/retention.yaml</code>.</li>
+    <li>Storing less in the first place: <code>bodies: false</code> and <code>headers: false</code> in <code>~/.upbox/rules/capture.yaml</code>.</li>
+  </ul>
+
+  <h3>8. Limitations</h3>
+  <ul>
+    <li>upbox records only traffic that passed through its proxy from a process it was configured to capture. Absence of a record is not evidence that no request was made.</li>
+    <li>A stored body may contain personal data about other people. upbox cannot separate their data from yours.</li>
+    <li>Timestamps are the capture host's wall clock, not attested by any time authority.</li>
+    <li>Erasures are disclosed, not hidden: a tombstone keeps its position and hash so the log stays verifiable.</li>
+  </ul>
+
+  <h3>9. As a file</h3>
+  <p class="muted small">Run <code>upbox report -o report.md</code> for the hand-over document.</p>
+</div>
+{% endblock %}

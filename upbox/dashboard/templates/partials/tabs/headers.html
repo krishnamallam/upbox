@@ -1,3 +1,5 @@
+{% set omitted = row['omitted_fields'] | from_json or [] %}
+{% set pruned = row['pruned_fields'] | from_json or [] %}
 <div class="sec-h">Request headers ({{ headers | length }})</div>
 {% if headers %}
   <div class="headers">
@@ -13,6 +15,10 @@
       </div>
     {% endfor %}
   </div>
+{% elif 'headers_json' in omitted %}
+  <p class="muted small">Not stored: <code>capture.yaml</code> has <code>headers: false</code>.</p>
+{% elif 'headers_json' in pruned %}
+  <p class="muted small">Cleared by retention on {{ row['pruned_at'] }}. Digest recorded.</p>
 {% else %}
   <p class="muted small">No headers captured.</p>
 {% endif %}

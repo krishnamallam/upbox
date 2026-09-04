@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from upbox.addons.capture import CapturePolicy
 from upbox.dashboard.app import _format_body, _pretty_json, create_app
-from upbox.db.store import BODY_EXCERPT_MAX, RequestRecord, Store
+from upbox.db.store import BODY_EXCERPT_MAX, EraseSelection, RequestRecord, Store
 
 
 @pytest.fixture
@@ -623,3 +624,161 @@ def test_settings_page_offers_capture_editor(client: TestClient) -> None:
     response = client.get("/settings")
 
     assert "capture.yaml" in response.text
+
+
+# --- v0.3: content states, badge, tombstones, transparency, schema guard ------
+
+
+def _row(**overrides: object) -> RequestRecord:
+    base: dict[str, object] = {
+        "ts": "2026-09-04T09:00:00+00:00",
+        "tool": "Cursor",
+        "method": "POST",
+        "scheme": "https",
+        "host": "api.cursor.sh",
+        "path": "/v1/chat",
+        "req_bytes": 42,
+        "resp_bytes": 100,
+        "status": 200,
+        "headers_json": '{"content-type": "application/json"}',
+        "body_excerpt": '{"prompt": "hi"}',
+        "body_hash": "deadbeef",
+        "redactions_applied_json": None,
+        "enforcement": None,
+    }
+    base.update(overrides)
+    return RequestRecord(**base)  # type: ignore[arg-type]
+
+
+def _db_with(tmp_path: Path, record: RequestRecord) -> Path:
+    db = tmp_path / "one.db"
+    with Store(db) as s:
+        s.insert_request(record)
+    return db
+
+
+def _get(db: Path, url: str) -> str:
+    with TestClient(create_app(db)) as c:
+        return c.get(url).text
+
+
+def test_body_tab_says_when_the_body_was_not_stored(tmp_path: Path) -> None:
+    db = _db_with(tmp_path, _row(body_excerpt=None, omitted_fields='["body_excerpt"]'))
+
+    assert "Not stored" in _get(db, "/requests/1")
+
+
+def test_body_tab_says_when_retention_cleared_the_body(tmp_path: Path) -> None:
+    db = _db_with(tmp_path, _row(body_excerpt=None))
+    with Store(db) as s:
+        s._conn.execute(
+            "UPDATE requests SET pruned_at = '2026-09-01T00:00:00+00:00', "
+            'pruned_fields = \'["body_excerpt", "headers_json"]\' WHERE id = 1'
+        )
+
+    assert "Cleared by retention" in _get(db, "/requests/1")
+
+
+def test_body_tab_still_says_empty_for_a_bodyless_request(tmp_path: Path) -> None:
+    db = _db_with(tmp_path, _row(body_excerpt=""))
+
+    assert "(empty)" in _get(db, "/requests/1")
+
+
+def test_headers_tab_says_when_headers_were_not_stored(tmp_path: Path) -> None:
+    db = _db_with(tmp_path, _row(headers_json=None, omitted_fields='["headers_json"]'))
+
+    assert "Not stored" in _get(db, "/requests/1?tab=headers")
+
+
+def test_stats_bar_shows_the_metadata_only_badge(
+    populated_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "upbox.dashboard.app.load_capture_policy",
+        lambda: CapturePolicy(bodies=False, headers=False),
+    )
+
+    assert "metadata-only" in _get(populated_db, "/stats")
+
+
+def test_stats_bar_hides_the_badge_under_full_capture(
+    populated_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("upbox.dashboard.app.load_capture_policy", lambda: CapturePolicy())
+
+    assert "metadata-only" not in _get(populated_db, "/stats")
+
+
+def test_erased_request_renders_a_tombstone(populated_db: Path) -> None:
+    with Store(populated_db) as s:
+        s.erase(EraseSelection(ids=(1,)), "asked nicely")
+
+    assert "Erased on request" in _get(populated_db, "/requests/1")
+
+
+def test_tombstone_shows_the_reason(populated_db: Path) -> None:
+    with Store(populated_db) as s:
+        s.erase(EraseSelection(ids=(1,)), "asked nicely")
+
+    assert "asked nicely" in _get(populated_db, "/requests/1")
+
+
+def test_erased_request_leaves_the_feed(populated_db: Path) -> None:
+    with Store(populated_db) as s:
+        s.erase(EraseSelection(ids=(1,)), "asked nicely")
+
+    assert "api.cursor.sh" not in _get(populated_db, "/requests/recent")
+
+
+def test_transparency_page_returns_200(client: TestClient) -> None:
+    response = client.get("/transparency")
+
+    assert response.status_code == 200
+
+
+def test_transparency_page_names_a_recipient_host(client: TestClient) -> None:
+    response = client.get("/transparency")
+
+    assert "api.cursor.sh" in response.text
+
+
+def test_sidebar_links_to_the_transparency_page(client: TestClient) -> None:
+    response = client.get("/sidebar")
+
+    assert 'href="/transparency"' in response.text
+
+
+def _downgrade_to_v3(db: Path) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    for column in ("omitted_fields", "erased_at", "erased_reason"):
+        conn.execute(f"ALTER TABLE requests DROP COLUMN {column}")
+    conn.execute("UPDATE schema_version SET version = 3")
+    conn.commit()
+    conn.close()
+
+
+def test_schema_behind_database_returns_503(populated_db: Path) -> None:
+    _downgrade_to_v3(populated_db)
+
+    with TestClient(create_app(populated_db)) as c:
+        response = c.get("/")
+
+    assert response.status_code == 503
+
+
+def test_schema_behind_notice_names_the_fix(populated_db: Path) -> None:
+    _downgrade_to_v3(populated_db)
+
+    assert "upbox start" in _get(populated_db, "/")
+
+
+def test_static_assets_still_serve_when_schema_behind(populated_db: Path) -> None:
+    _downgrade_to_v3(populated_db)
+
+    with TestClient(create_app(populated_db)) as c:
+        response = c.get("/static/dashboard.css")
+
+    assert response.status_code == 200

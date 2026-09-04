@@ -1,9 +1,15 @@
+{% set omitted = row['omitted_fields'] | from_json or [] %}
+{% set pruned = row['pruned_fields'] | from_json or [] %}
 <div class="sec-h">Request body</div>
 {% if row['body_excerpt'] %}
   {% if row['req_bytes'] and row['req_bytes'] > body_excerpt_max %}
     <p class="body-note">Showing first {{ body_excerpt_max | bytes }} of {{ row['req_bytes'] | bytes }}. Full body not stored (integrity hash recorded).</p>
   {% endif %}
   <pre class="body">{{ row['body_excerpt'] | format_body(content_type) | redact_marks }}</pre>
+{% elif 'body_excerpt' in omitted %}
+  <p class="body-note">Not stored: <code>capture.yaml</code> has <code>bodies: false</code>. Size ({{ row['req_bytes'] | bytes }}) and SHA-256 were recorded.</p>
+{% elif 'body_excerpt' in pruned %}
+  <p class="body-note">Cleared by retention on {{ row['pruned_at'] }}. Digest recorded; the chain still verifies.</p>
 {% else %}
   <pre class="body">(empty)</pre>
 {% endif %}

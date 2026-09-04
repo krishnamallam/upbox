@@ -34,6 +34,9 @@
   <div class="val bad">{{ stats['blocked'] or 0 }}</div>
 </a>
 <div class="stats-right">
+  {% if capture_policy and capture_policy.is_metadata_only %}
+    <span class="badge capture-badge" title="capture.yaml: bodies and headers are not stored">capture: metadata-only</span>
+  {% endif %}
   <div class="theme-pick" role="group" aria-label="Theme">
     <button type="button" id="theme-dark" class="on" title="Dark theme" aria-label="Dark theme">
       <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
