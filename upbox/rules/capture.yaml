@@ -1,0 +1,15 @@
+# What upbox stores per request beyond metadata. Metadata (timestamp, tool,
+# host, path with credentials removed, sizes, status, body SHA-256, redaction
+# and enforcement outcomes) is always kept.
+#
+# bodies:  store the request body excerpt (up to 100 KB, after redaction).
+#          body_hash and req_bytes are recorded either way.
+# headers: store request headers. Credential values are always replaced with
+#          [REDACTED:header] before storage, whatever this says.
+#
+# Both false is metadata-only mode: the recommended configuration on machines
+# you do not own. Copy this file to ~/.upbox/rules/capture.yaml to change it.
+# A user file that fails to parse puts upbox in metadata-only mode until it is
+# fixed: over-collecting is the direction that cannot be undone.
+bodies: true
+headers: true

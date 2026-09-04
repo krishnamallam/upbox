@@ -1,4 +1,4 @@
-"""Capture mitmproxy addon — persists every completed flow to SQLite.
+"""Capture mitmproxy addon: persists every completed flow to SQLite, subject to capture.yaml.
 
 Per CLAUDE.md's error-handling rule, hook bodies are wrapped in try/except
 so an exception in capture never crashes the proxy. The next flow still
@@ -11,8 +11,13 @@ import hashlib
 import json
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import resources
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from upbox.addons._hostname import resolve_host
 from upbox.db.store import RequestRecord, Store, truncate_body_excerpt
@@ -74,6 +79,77 @@ SENSITIVE_QUERY_PARAMS = frozenset(
 
 QUERY_REDACTION_MARKER = "[REDACTED:query]"
 
+DEFAULT_RULES_RESOURCE = "capture.yaml"
+USER_RULES_PATH = Path.home() / ".upbox" / "rules" / "capture.yaml"
+_POLICY_KEYS = ("bodies", "headers")
+
+
+@dataclass(frozen=True)
+class CapturePolicy:
+    """Which content columns the proxy stores. Metadata is always stored."""
+
+    bodies: bool = True
+    headers: bool = True
+
+    @property
+    def is_metadata_only(self) -> bool:
+        return not self.bodies and not self.headers
+
+    def omitted_columns(self) -> tuple[str, ...]:
+        """The content columns this policy withholds, in schema order."""
+        omitted: list[str] = []
+        if not self.bodies:
+            omitted.append("body_excerpt")
+        if not self.headers:
+            omitted.append("headers_json")
+        return tuple(omitted)
+
+
+METADATA_ONLY = CapturePolicy(bodies=False, headers=False)
+
+
+def load_policy() -> CapturePolicy:
+    """Read capture.yaml, preferring the user file over the bundled default.
+
+    A user file that exists but is unreadable, not a mapping, or carries a
+    non-boolean value yields metadata-only, not the bundled default. Its
+    existence signals intent to restrict, and storing prompt bodies that were
+    meant to be withheld is the direction that cannot be undone.
+    """
+    if USER_RULES_PATH.exists():
+        try:
+            raw = yaml.safe_load(USER_RULES_PATH.read_text())
+        except Exception:
+            log.exception("capture.yaml is unreadable; storing metadata only until it is fixed")
+            return METADATA_ONLY
+        policy = _parse_policy(raw)
+        if policy is None:
+            log.error("capture.yaml is invalid; storing metadata only until it is fixed")
+            return METADATA_ONLY
+        return policy
+    bundled = yaml.safe_load(
+        resources.files("upbox.rules").joinpath(DEFAULT_RULES_RESOURCE).read_text()
+    )
+    return _parse_policy(bundled) or CapturePolicy()
+
+
+def _parse_policy(raw: object) -> CapturePolicy | None:
+    """Turn parsed YAML into a policy, or None when the shape is wrong."""
+    if not isinstance(raw, dict):
+        return None
+    values: dict[str, bool] = {}
+    for key in _POLICY_KEYS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, bool):
+            return None
+        values[key] = value
+    for key in raw:
+        if key not in _POLICY_KEYS:
+            log.warning("ignoring unknown capture.yaml key %r", key)
+    return CapturePolicy(**values)
+
 
 def redact_query_string(path: str) -> str:
     """Replace credential-bearing query parameter values with a marker.
@@ -112,10 +188,27 @@ def redact_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
 
 
 class CaptureAddon:
-    """mitmproxy addon: persist every completed flow."""
+    """mitmproxy addon: persist every completed flow, subject to the capture policy."""
 
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, policy: CapturePolicy | None = None) -> None:
         self._store = store
+        self._policy = policy if policy is not None else load_policy()
+
+    @property
+    def policy(self) -> CapturePolicy:
+        return self._policy
+
+    def reload(self) -> None:
+        """Re-read capture.yaml and swap the policy. Keeps the old one on failure."""
+        try:
+            new_policy = load_policy()
+        except Exception:
+            log.exception("capture policy reload failed; keeping previous policy")
+            return
+        self._policy = new_policy
+        log.info(
+            "reloaded capture.yaml (bodies=%s, headers=%s)", new_policy.bodies, new_policy.headers
+        )
 
     def response(self, flow: http.HTTPFlow) -> None:
         """Called by mitmproxy after a response is received for a flow."""
@@ -125,11 +218,12 @@ class CaptureAddon:
         except Exception:
             log.exception("capture addon failed on flow %s", getattr(flow, "id", "<unknown>"))
 
-    @staticmethod
-    def _record_from_flow(flow: http.HTTPFlow) -> RequestRecord:
+    def _record_from_flow(self, flow: http.HTTPFlow) -> RequestRecord:
         req = flow.request
         resp = flow.response
         body = req.content or b""
+        policy = self._policy
+        omitted = policy.omitted_columns()
         return RequestRecord(
             ts=datetime.now(UTC).isoformat(),
             tool=flow.metadata.get("upbox_tool"),
@@ -140,8 +234,12 @@ class CaptureAddon:
             req_bytes=len(body),
             resp_bytes=len(resp.content) if resp and resp.content else None,
             status=resp.status_code if resp else None,
-            headers_json=json.dumps(redact_headers(req.headers.items())),  # type: ignore[no-untyped-call]
-            body_excerpt=truncate_body_excerpt(body),
+            headers_json=(
+                json.dumps(redact_headers(req.headers.items()))  # type: ignore[no-untyped-call]
+                if policy.headers
+                else None
+            ),
+            body_excerpt=truncate_body_excerpt(body) if policy.bodies else None,
             body_hash=hashlib.sha256(body).hexdigest() if body else None,
             redactions_applied_json=(
                 json.dumps(flow.metadata["upbox_redactions"])
@@ -149,4 +247,5 @@ class CaptureAddon:
                 else None
             ),
             enforcement=flow.metadata.get("upbox_enforcement"),
+            omitted_fields=json.dumps(list(omitted)) if omitted else None,
         )
