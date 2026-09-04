@@ -67,9 +67,9 @@ Moved out of v0.2:
   employee-monitoring exposure. It needs the workplace-deployment
   groundwork first.
 
-## v0.3: subject rights (in progress)
+## v0.3: subject rights (shipped 2026-09-04)
 
-- **Shipped in this branch:** metadata-only mode (`capture.yaml`), the
+- **Shipped:** metadata-only mode (`capture.yaml`), the
   subject-transparency report (`upbox report`, `/transparency`), and
   chain-preserving per-record erasure (`upbox erase`).
 
