@@ -62,6 +62,10 @@ _V4_SUBJECT_RIGHTS_COLUMNS = {
 # Text columns retention clears, paired with the digest column that keeps the
 # chain verifiable once the text is gone.
 PRUNABLE_CONTENT = (("body_excerpt", "body_excerpt_sha256"), ("headers_json", "headers_sha256"))
+# Body-tier retention only touches rows that still hold content. A row whose
+# content was never stored (capture.yaml) or already cleared has nothing to
+# clear, and stamping it would inflate the "cleared" count.
+_HAS_PRUNABLE_CONTENT = "(body_excerpt IS NOT NULL OR headers_json IS NOT NULL)"
 # Cap stored request bodies at 100 KB. The proxy still forwards the full body;
 # this only bounds what lands in the audit DB. ``body_hash`` covers the whole
 # body for integrity, ``req_bytes`` records the true size. Bigger than the old
@@ -415,7 +419,8 @@ class Store:
             bodies = int(
                 self._conn.execute(
                     "SELECT COUNT(*) FROM requests "
-                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL "
+                    f"AND {_HAS_PRUNABLE_CONTENT}",
                     (body_cutoff.isoformat(),),
                 ).fetchone()[0]
             )
@@ -472,7 +477,8 @@ class Store:
                 cursor = self._conn.execute(
                     "UPDATE requests SET body_excerpt = NULL, headers_json = NULL, "
                     "pruned_at = ?, pruned_fields = ? "
-                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL "
+                    f"AND {_HAS_PRUNABLE_CONTENT}",
                     (stamp, cleared_columns, body_cutoff.isoformat()),
                 )
                 bodies_cleared = cursor.rowcount
