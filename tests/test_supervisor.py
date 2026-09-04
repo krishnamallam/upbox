@@ -231,3 +231,46 @@ def test_child_command_reuses_the_frozen_executable(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "frozen", True, raising=False)
 
     assert supervisor._child_command(["dashboard"]) == [sys.executable, "dashboard"]
+
+
+def test_wait_until_ready_returns_true_once_the_probe_answers() -> None:
+    answers = iter([False, False, True])
+
+    ready = supervisor.wait_until_ready(
+        "u", lambda _url: next(answers), attempts=5, sleep=lambda _s: None
+    )
+
+    assert ready is True
+
+
+def test_wait_until_ready_gives_up_after_the_attempts() -> None:
+    ready = supervisor.wait_until_ready("u", lambda _url: False, attempts=3, sleep=lambda _s: None)
+
+    assert ready is False
+
+
+def test_dashboard_opens_in_the_browser_once_ready() -> None:
+    opened: list[str] = []
+
+    supervisor.open_dashboard_when_ready(
+        "http://127.0.0.1:8800/",
+        probe=lambda _url: True,
+        opener=lambda url: opened.append(url) or True,
+        sleep=lambda _s: None,
+    )
+
+    assert opened == ["http://127.0.0.1:8800/"]
+
+
+def test_dashboard_is_not_opened_when_it_never_answers() -> None:
+    opened: list[str] = []
+
+    supervisor.open_dashboard_when_ready(
+        "http://127.0.0.1:8800/",
+        probe=lambda _url: False,
+        opener=lambda url: opened.append(url) or True,
+        attempts=2,
+        sleep=lambda _s: None,
+    )
+
+    assert opened == []

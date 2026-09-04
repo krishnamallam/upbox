@@ -3,7 +3,7 @@
 # unrelated, dormant 2022 project, so we publish as "upbox-sh" (matches the
 # upbox.sh homepage). The import package and CLI command are still `upbox`.
 name = "upbox-sh"
-version = "0.4.0"
+version = "0.4.1"
 description = "See, audit, and control what your AI tools send to the cloud."
 readme = "README.md"
 license = { file = "LICENSE" }

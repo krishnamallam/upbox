@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.1 (unreleased)
+
+### Fixed
+
+- **The Windows executable has the upbox icon.** v0.4.0 shipped with
+  PyInstaller's default icon because the spec never set one. The icon is
+  rasterised from the site mark by `packaging/make_icon.py` into a seven-size
+  `.ico`.
+- **Double-clicking `upbox.exe` starts upbox.** Opening the exe from Explorer
+  used to flash a console that printed the help and closed. It now asks Windows
+  for administrator rights (OS-level capture installs a network driver), asks
+  once before installing the local CA, starts the proxy and dashboard, and opens
+  the dashboard in the browser; closing the window stops upbox. Declining the
+  permission prompt shows the PowerShell commands instead. Launching from a
+  terminal is unchanged.
+
+### Added
+
+- `upbox start --open` opens the dashboard in the default browser once it
+  answers.
+
 ## v0.4.0 (2026-09-04)
 
 ### Added

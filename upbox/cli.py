@@ -84,6 +84,9 @@ def start(
             "(e.g., --allow example.com also allows api.example.com)."
         ),
     ),
+    open_browser: bool = typer.Option(
+        False, "--open", help="Open the dashboard in your browser once it answers."
+    ),
 ) -> None:
     """Start the proxy + dashboard with OS-level traffic capture.
 
@@ -125,8 +128,20 @@ def start(
         capture_spec=spec,
         use_allowlist=not no_allowlist,
         extra_allow_hosts=tuple(allow or ()),
+        open_dashboard=open_browser,
     )
     raise typer.Exit(code=rc)
+
+
+@app.command(hidden=True)
+def launch() -> None:
+    """Windows double-click entry.
+
+    CA consent and install if needed, then start with the dashboard opened.
+    """
+    from upbox.launch import run_launch
+
+    raise typer.Exit(code=run_launch())
 
 
 @app.command()

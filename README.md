@@ -56,8 +56,9 @@ xattr -d com.apple.quarantine /usr/local/bin/upbox   # unsigned binary; Gatekeep
 # Linux (glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora 36+)
 tar -xzf upbox-*-linux-x86_64.tar.gz && sudo install upbox /usr/local/bin/upbox
 
-# Windows: rename to upbox.exe and put it on PATH. SmartScreen warns once:
-# "More info", then "Run anyway".
+# Windows: double-click upbox.exe. It asks for administrator rights, asks once
+# before installing the CA, starts, and opens the dashboard. SmartScreen warns
+# once: "More info", then "Run anyway". Or run it from PowerShell like the others.
 ```
 
 The binaries are unsigned; [docs/installing.md](docs/installing.md#native-binaries)
