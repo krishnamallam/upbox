@@ -987,6 +987,72 @@ class Store:
         ).fetchone()
         return int(row[0])
 
+    def live_row_summary(self) -> sqlite3.Row:
+        """Count, time span, and bytes over rows that have not been erased."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total, MIN(ts) AS first_ts, MAX(ts) AS last_ts, "
+            "COALESCE(SUM(req_bytes), 0) AS total_bytes FROM requests WHERE erased_at IS NULL"
+        ).fetchone()
+        return cast("sqlite3.Row", row)
+
+    def recipients(self) -> list[sqlite3.Row]:
+        """Per tool and destination host: how much went where, and when."""
+        return list(
+            self._conn.execute(
+                """
+                SELECT
+                    COALESCE(tool, 'Unknown')   AS tool,
+                    host,
+                    COUNT(*)                    AS requests,
+                    COALESCE(SUM(req_bytes), 0) AS req_bytes,
+                    MIN(ts)                     AS first_seen,
+                    MAX(ts)                     AS last_seen
+                FROM requests
+                WHERE erased_at IS NULL
+                GROUP BY COALESCE(tool, 'Unknown'), host
+                ORDER BY requests DESC, tool, host
+                """
+            )
+        )
+
+    def erasures(self) -> list[sqlite3.Row]:
+        """Every tombstone: when the request happened, when it was erased, and why."""
+        return list(
+            self._conn.execute(
+                "SELECT ts, erased_at, erased_reason FROM requests "
+                "WHERE erased_at IS NOT NULL ORDER BY erased_at, seq"
+            )
+        )
+
+    def pruned_content_count(self) -> int:
+        """Live rows whose body or headers were cleared by retention."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM requests WHERE pruned_at IS NOT NULL AND erased_at IS NULL"
+        ).fetchone()
+        return int(row[0])
+
+    def legal_hold_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM requests WHERE legal_hold = 1").fetchone()
+        return int(row[0])
+
+    def deleted_entry_count(self) -> int:
+        """Entries removed by retention, derived from the recorded gap ranges.
+
+        Derived from the ranges rather than read from ``entry_count`` for the
+        same reason verification does it: a forged count must not be able to
+        change what a report discloses.
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(seq_end - seq_start + 1), 0) FROM chain_gaps"
+        ).fetchone()
+        return int(row[0])
+
+    def latest_checkpoint(self) -> sqlite3.Row | None:
+        row = self._conn.execute(
+            "SELECT * FROM chain_checkpoints ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return cast("sqlite3.Row | None", row)
+
     def iter_all(self) -> Iterator[sqlite3.Row]:
         yield from self._conn.execute("SELECT * FROM requests WHERE erased_at IS NULL ORDER BY id")
 
