@@ -212,3 +212,22 @@ def test_run_forwards_no_allowlist_flag(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert "--no-allowlist" in spawned_args[0]
     assert spawned_args[0][-2:] == ["--allow", "custom.ai"]
+
+
+def test_child_command_uses_module_form_when_not_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    assert supervisor._child_command(["proxy", "--port", "1"]) == [
+        sys.executable,
+        "-m",
+        "upbox",
+        "proxy",
+        "--port",
+        "1",
+    ]
+
+
+def test_child_command_reuses_the_frozen_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert supervisor._child_command(["dashboard"]) == [sys.executable, "dashboard"]
