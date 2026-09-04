@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (2026-08-03)
+## v0.2.0 (2026-09-04)
 
 The compliance release, reshaped. v0.2 was scoped as the "AI Act enforcement"
 release for 1 August 2026. On 24 July 2026,
@@ -12,6 +12,11 @@ transparency did start on 2 August 2026, and GDPR always applied.
 
 So this release is about making the audit log hold up as evidence, and about not
 creating legal risk for the people who deploy it.
+
+A note on v0.1.2: it was merged on 2026-06-30 but never tagged or published, so
+PyPI went from 0.1.1 straight to 0.2.0. The live-reload and the Anthropic/OpenAI
+key redaction fix listed under v0.1.2 below reach PyPI users for the first time
+in this release. If you installed from PyPI you are on 0.1.1 and should upgrade.
 
 ### Security
 
@@ -84,7 +89,7 @@ creating legal risk for the people who deploy it.
 - Noted that `docs/ai-act-mapping.md` had documented a `blocked` column renamed
   to `enforcement` back in v0.1.0.
 
-## v0.1.2 (2026-06-16)
+## v0.1.2 (never published, folded into v0.2.0)
 
 Live-reload of rule files and a redaction-leak fix.
 

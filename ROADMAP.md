@@ -25,7 +25,7 @@ Planned milestones for upbox. Dates are targets, not commitments. See [PLAN.md](
   Google / Slack / GitHub fine-grained / Bearer coverage.
 - **Pending:** Firefox NSS auto-install on Windows.
 
-## v0.2: evidence you can defend (shipped 2026-08-03)
+## v0.2: evidence you can defend (shipped 2026-09-04)
 
 Originally scoped as the "AI Act enforcement" release for 1 August 2026.
 That rationale changed on 24 July 2026, when
