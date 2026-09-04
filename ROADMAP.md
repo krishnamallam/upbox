@@ -73,9 +73,9 @@ Moved out of v0.2:
   subject-transparency report (`upbox report`, `/transparency`), and
   chain-preserving per-record erasure (`upbox erase`).
 
-## v0.4: native binaries (in progress)
+## v0.4: native binaries (shipped 2026-09-04)
 
-- **Shipped in this branch:** one-file `upbox` executables for Windows x86_64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x86_64 (`.tar.gz`), built and smoke-tested in the release workflow. Unsigned; a code-signing certificate follows if antivirus false positives become a real problem.
+- **Shipped:** one-file `upbox` executables for Windows x86_64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x86_64 (`.tar.gz`), built and smoke-tested in the release workflow. Unsigned; a code-signing certificate follows if antivirus false positives become a real problem.
 
 ## Later
 
