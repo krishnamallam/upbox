@@ -67,7 +67,13 @@ Moved out of v0.2:
   employee-monitoring exposure. It needs the workplace-deployment
   groundwork first.
 
-## v0.3 and beyond
+## v0.3: subject rights (in progress)
+
+- **Shipped in this branch:** metadata-only mode (`capture.yaml`), the
+  subject-transparency report (`upbox report`, `/transparency`), and
+  chain-preserving per-record erasure (`upbox erase`).
+
+## Later
 
 - **Native binaries:** single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
 - **Workplace deployment pack:** worker notice template, DPIA skeleton
@@ -75,11 +81,6 @@ Moved out of v0.2:
   team mode.
 - **Team mode** (central dashboard, multiple endpoints, LAN-local),
   moved from v0.2 and gated behind the deployment pack.
-- **Metadata-only mode:** `capture.bodies: false`, keeping `body_hash`
-  and sizes. The recommended configuration for multi-user deployments.
-- **Subject-transparency view:** what upbox recorded about one person,
-  for GDPR Article 15 access requests, plus a chain-preserving
-  per-record erasure path.
 - Plugin SDK for custom tool fingerprints
 - Companion browser extension (for web LLM apps)
 - macOS menu-bar app, Windows tray app

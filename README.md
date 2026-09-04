@@ -125,6 +125,8 @@ upbox doctor                       # at-rest protection, file modes, chain healt
 upbox export --format audit        # upbox.audit.v1 (chain proof + disclosures)
 upbox prune --dry-run              # what retention would remove
 upbox hold --since 2026-07-01      # exempt a range from retention
+upbox erase --id 18422 --reason "access request"   # Article 17: tombstone, chain intact
+upbox report -o report.md --records records.ndjson # Article 15: what upbox holds about you
 ```
 
 ### Deploying on machines you don't own
@@ -137,6 +139,38 @@ acted on it. Inform workers and their representatives first, and read the
 Article 88 section of [docs/ai-act-mapping.md](docs/ai-act-mapping.md).
 
 Running upbox on your own machine raises none of this.
+
+### Metadata-only mode
+
+`~/.upbox/rules/capture.yaml` decides whether request bodies and headers are
+stored at all:
+
+```yaml
+bodies: false
+headers: false
+```
+
+With both off, upbox keeps timestamps, tools, hosts, paths (credentials
+removed), sizes, status codes, the SHA-256 of each body, and the redaction and
+allowlist outcomes. Nothing a prompt contained is written to disk. Redaction
+still runs on the way out. The setting is live-reloaded, editable on the
+dashboard settings page, and recorded in every audit export. A file that fails
+to parse puts upbox in metadata-only mode rather than storing more than you
+meant. This is the recommended configuration on machines you do not own.
+
+### Subject rights: access and erasure
+
+`upbox report` writes what upbox holds about this machine's user: the data
+categories and whether each is stored, recipients per tool and host, the
+retention policy in force, any erasures, chain status, and how to get a copy or
+erase. It is the document to hand over for a GDPR Article 15 request; add
+`--records` for the machine-readable copy. The dashboard shows the same at
+`/transparency`.
+
+`upbox erase --id N --reason "..."` (or `--host`, `--tool`, `--since`,
+`--until`) erases individual records for Article 17. The row becomes a
+tombstone: content gone, timestamp and hashes kept, so the chain still
+verifies and reports the erasure. A legal hold refuses it.
 
 ## Verify the install
 
@@ -292,9 +326,10 @@ no Python process can match. So turn one of them on:
 `upbox doctor` reports whether it is on, the database file modes, and the chain
 status. It reports `UNKNOWN` rather than guessing when it cannot tell.
 
-The stronger control is not storing the data in the first place: redaction
-strips secrets before they are written, and retention (`body_days`, default 7)
-clears stored bodies on a schedule. A body you never kept needs no key.
+The stronger control is not storing the data in the first place: `capture.yaml`
+can switch bodies and headers off entirely, redaction strips secrets before they
+are written, and retention (`body_days`, default 7) clears stored bodies on a
+schedule. A body you never kept needs no key.
 
 ## Tamper evidence
 
@@ -321,6 +356,14 @@ what `upbox checkpoint` is for: it seals the current head so you can mail it to
 yourself, commit it, or have it timestamped. upbox will not do that for you,
 because it makes no outbound network calls, and that rule is worth more than
 automatic anchoring would be.
+
+**Erasure is disclosed, not hidden.** `upbox erase` leaves a tombstone that
+keeps its position and hash, so `upbox verify` still links through it and
+reports how many entries were erased, and the export carries the time and
+reason for each. The trade-off is the same one retention gaps make: a row that
+was tampered with and then tombstoned is indistinguishable from a legitimate
+erasure except by that disclosure. That is why the reason is mandatory and
+why the count appears in every export and report.
 
 The chain proves order, not time. Timestamps are unattested host wall clock.
 

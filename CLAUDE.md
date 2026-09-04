@@ -64,17 +64,18 @@ Every insert is chained: `entry_hash = sha256(domain separator + canonical JSON 
 
 The chain is keyless and its evidentiary value comes from a head hash that left the machine (`upbox checkpoint`). Deletions by retention are recorded in `chain_gaps` so verification resumes across them; an undisclosed gap is reported as tampering.
 
-Single-writer rule: only the proxy process writes. The dashboard opens with `read_only=True` (`PRAGMA query_only`), never migrates an existing database, and a write attempt raises `ReadOnlyStoreError`. Retention runs inside the proxy for the same reason. Files under `~/.upbox` are forced to owner-only permissions at every open; upbox deliberately does not encrypt the database itself (see README "At rest" for the reasoning before proposing otherwise).
+Single-writer rule: only the proxy process writes. The dashboard opens with `read_only=True` (`PRAGMA query_only`), never migrates an existing database, and a write attempt raises `ReadOnlyStoreError`. Retention runs inside the proxy for the same reason. Files under `~/.upbox` are forced to owner-only permissions at every open; upbox deliberately does not encrypt the database itself (see README "At rest" for the reasoning before proposing otherwise). Rows have three content states: stored, never stored by `capture.yaml` (`omitted_fields`), cleared by retention (`pruned_fields`); plus tombstones (`erased_at`). Every surface that shows a body must distinguish them.
 
 ### Rules (`upbox/rules/*.yaml` and `~/.upbox/rules/`)
 
-Five bundled YAML files ship inside the package and are read via `importlib.resources`. A user file of the same name under `~/.upbox/rules/` overrides the bundled one.
+Six bundled YAML files ship inside the package and are read via `importlib.resources`. A user file of the same name under `~/.upbox/rules/` overrides the bundled one.
 
 | File | Consumed by | Editable in dashboard | Applied |
 |---|---|---|---|
 | `tools.yaml` | fingerprint + TLS allowlist | yes | live reload (~1 s poll) for tagging; new hosts need a restart |
 | `redact.yaml` | redact | yes | live reload |
 | `allowlist.yaml` | enforce | yes | live reload |
+| `capture.yaml` | capture | yes | live reload |
 | `no_intercept.yaml` | proxy `ignore_hosts` | no | boot only |
 | `retention.yaml` | `RetentionRunner` | no | re-read on every daily pass |
 
@@ -86,7 +87,7 @@ FastAPI + Jinja2 rendering HTML partials (`/requests/recent`, `/sidebar`, `/stat
 
 ### CLI (`upbox/cli.py`, Typer)
 
-`init` (CA generate + install to trust stores, `--uninstall`), `start`, `proxy`, `dashboard`, `status`, `verify`, `doctor`, `prune`, `hold`, `checkpoint`, `export --format jsonl|csv|audit`. `stop` is an unimplemented stub and `status` still prints placeholder liveness lines. `export --format audit` writes `upbox.audit.v1` (`audit_export.py`): header with ruleset digests and chain verification, one record per row, footer. Do not describe it as an "Article 26 format"; the module docstring explains why.
+`init` (CA generate + install to trust stores, `--uninstall`), `start`, `proxy`, `dashboard`, `status`, `verify`, `doctor`, `prune`, `hold`, `erase`, `checkpoint`, `export --format jsonl|csv|audit`, `report`. `stop` is an unimplemented stub and `status` still prints placeholder liveness lines. `export --format audit` writes `upbox.audit.v1` (`audit_export.py`): header with ruleset digests and chain verification, one record per row, footer. Do not describe it as an "Article 26 format"; the module docstring explains why.
 
 ### CA (`upbox/ca.py`)
 
@@ -102,6 +103,7 @@ Self-signed root under `~/.upbox/ca/`, key at 0600, installed per platform (macO
 - `flagged` means forwarded. Never present it as blocked, in code or in copy.
 - `no_intercept.yaml` is never narrowed by code changes or defaults.
 - Do not add application-level database encryption; the decision and reasoning are in `atrest.py` and the README.
+- Erasure is disclosed, never hidden: tombstones keep `ts`, `seq`, and both hashes; `verify`, the export, and the report count them. Never add a code path that deletes a chained row without a gap record or a tombstone.
 
 ## Conventions specific to this repo
 

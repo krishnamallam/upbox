@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.3.0 (unreleased)
+
+The subject-rights release. Store less, show what is stored, erase on request,
+all without weakening the hash chain.
+
+### Added
+
+- **Metadata-only capture.** A sixth rule file, `~/.upbox/rules/capture.yaml`,
+  with `bodies` and `headers` booleans. Both `false` stores timestamps, tools,
+  hosts, paths, sizes, status, hashes, and outcomes, and nothing else: the
+  recommended configuration on machines you do not own. Live-reloaded, editable
+  from the dashboard settings page, and disclosed in every audit export
+  (`ruleset.capture_sha256`, per-record `capture.omitted_fields`). A user file
+  that fails to parse puts upbox in metadata-only mode rather than storing more
+  than intended.
+- **`upbox erase`.** Per-record erasure for GDPR Article 17. Select by `--id`,
+  `--host`, `--tool`, or a time range, give a `--reason`, preview with
+  `--dry-run`. Erased rows become tombstones: every content column is cleared
+  and only the timestamp, `seq`, and hashes survive, so `upbox verify` still
+  passes and reports `N entries erased on request`. A legal hold on any
+  selected row refuses the whole operation. Tombstones appear in the audit
+  export with `erased.at` and `erased.reason`, and never in the dashboard feed.
+- **`upbox report`** and the dashboard `/transparency` page. What upbox holds
+  about this machine's user, for GDPR Article 15 access requests: categories
+  of data and whether each is stored, recipients per tool and host, retention
+  in force, erasures, chain status, how to get a copy or erase, and the
+  limitations. `--records` writes the machine-readable `upbox.audit.v1` copy
+  alongside. One generator feeds both the Markdown and the page.
+
+### Changed
+
+- The dashboard Body and Headers tabs distinguish "not stored by policy" from
+  "cleared by retention" from "empty". A `capture: metadata-only` badge shows
+  when both content columns are off.
+- `upbox prune` no longer counts or stamps rows that hold no content.
+- `upbox doctor` prints the capture policy in force.
+- The dashboard settings page no longer tells you to restart after an edit;
+  rules have live-reloaded since v0.1.2.
+
+### Upgrading
+
+- Nothing to do. The first writer to open the database (`upbox start`, or any
+  command except `dashboard`) adds three nullable columns; no data is
+  rewritten and every existing hash still verifies. `upbox dashboard` on its
+  own never migrates and will show a one-line notice until you run
+  `upbox start` once.
+
+### Documentation
+
+- README: metadata-only mode, subject rights, and the erasure trust model in
+  the tamper-evidence section.
+- `docs/ai-act-mapping.md`: GDPR Article 15 and Article 17 sections.
+
 ## v0.2.0 (2026-09-04)
 
 The compliance release, reshaped. v0.2 was scoped as the "AI Act enforcement"
