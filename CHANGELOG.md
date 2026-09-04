@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 (unreleased)
+## v0.3.0 (2026-09-04)
 
 The subject-rights release. Store less, show what is stored, erase on request,
 all without weakening the hash chain.
