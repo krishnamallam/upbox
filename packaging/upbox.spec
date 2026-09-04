@@ -1,0 +1,50 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for the one-file upbox binary.
+
+Build from inside the project environment:
+
+    uv sync --group build
+    uv run pyinstaller packaging/upbox.spec
+
+mitmproxy and mitmproxy_rs ship their own PyInstaller hooks, which bundle the
+local-mode redirector for the platform the build runs on. The Linux hook
+resolves that redirector through the environment's scripts directory, so an
+ephemeral ``uv run --with pyinstaller`` environment does not work: PyInstaller
+has to live in the same environment that installed mitmproxy.
+"""
+
+import os
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+# Rule YAML, schema.sql, and the dashboard templates and static files are all
+# read through importlib.resources and must travel with the binary. uvicorn
+# imports its loop and protocol implementations by string.
+datas = collect_data_files("upbox") + collect_data_files("publicsuffix2") + collect_data_files("certifi")
+hiddenimports = collect_submodules("uvicorn")
+
+a = Analysis(
+    [os.path.join(SPECPATH, "entry.py")],
+    pathex=[],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=["tkinter", "tcl", "tk"],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name="upbox",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+)
