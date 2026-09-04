@@ -554,3 +554,45 @@ def export(
             with Path(output).open("w", encoding="utf-8", newline="") as sink:
                 written = _write(sink, rows)
             typer.echo(f"wrote {written} rows to {output}")
+
+
+@app.command()
+def report(
+    output: str = typer.Option("-", "-o", help="Output path; - for stdout."),
+    fmt: str = typer.Option("md", "--format", help="md or json."),
+    records: str = typer.Option(
+        "",
+        "--records",
+        help="Also write an upbox.audit.v1 export of every row, tombstones included, here.",
+    ),
+) -> None:
+    """Write the subject-transparency report: what upbox holds about this machine's user.
+
+    The Markdown is the document to hand over for a GDPR Article 15 access
+    request. ``--records`` adds the machine-readable copy of the records.
+    """
+    import sys
+    from pathlib import Path
+
+    from upbox.audit_export import write_audit_v1
+    from upbox.db.store import Store
+    from upbox.report import build_report, render_json, render_markdown
+
+    if fmt not in {"md", "json"}:
+        typer.echo(f"unknown format: {fmt!r} (expected md or json)", err=True)
+        raise typer.Exit(code=2)
+
+    with Store() as store:
+        data = build_report(store)
+        rendered = render_json(data) if fmt == "json" else render_markdown(data)
+        if records:
+            # newline="" keeps the NDJSON single-spaced on Windows.
+            with Path(records).open("w", encoding="utf-8", newline="") as sink:
+                written = write_audit_v1(store, sink)
+            typer.echo(f"wrote {written} records to {records}", err=True)
+
+    if output == "-":
+        sys.stdout.write(rendered)
+        return
+    Path(output).write_text(rendered, encoding="utf-8")
+    typer.echo(f"wrote {output}")
