@@ -20,10 +20,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from upbox import settings
+from upbox.addons.capture import load_policy as load_capture_policy
 from upbox.dashboard.icons import icon_for
-from upbox.db.store import BODY_EXCERPT_MAX, DEFAULT_DB_PATH, Store
+from upbox.db.store import BODY_EXCERPT_MAX, DEFAULT_DB_PATH, SCHEMA_VERSION, Store
+from upbox.report import build_report
 
 
 def _resource_dir(name: str) -> Path:
@@ -232,6 +236,19 @@ def _redact_marks(value: str | None) -> Markup:
 
 templates.env.filters["redact_marks"] = _redact_marks
 
+# Shown instead of any page while the database is older than this build. The
+# dashboard is a reader and never migrates, so it has to say what will.
+_MIGRATION_NOTICE = (
+    "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+    "<title>upbox: database needs migration</title></head>"
+    "<body style='font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 42rem'>"
+    "<h1>This database needs a one-time migration</h1>"
+    "<p>The audit database is at schema version {found}; this upbox needs version {wanted}.</p>"
+    "<p>Run <code>upbox start</code> or <code>upbox verify</code> once to migrate it. "
+    "The dashboard opens the database read-only and never modifies your data.</p>"
+    "</body></html>"
+)
+
 
 def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     """Build the FastAPI app. The store is opened in the lifespan handler."""
@@ -242,6 +259,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
         # advance the log without advancing the hash chain, which verifies as
         # tampering.
         app.state.store = Store(db_path, read_only=True)
+        app.state.schema_behind = app.state.store.schema_version < SCHEMA_VERSION
         try:
             yield
         finally:
@@ -250,6 +268,16 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
     app = FastAPI(title="upbox dashboard", lifespan=lifespan)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.middleware("http")
+    async def schema_guard(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        behind = getattr(request.app.state, "schema_behind", False)
+        if behind and not request.url.path.startswith("/static/"):
+            found = request.app.state.store.schema_version
+            return HTMLResponse(
+                _MIGRATION_NOTICE.format(found=found, wanted=SCHEMA_VERSION), status_code=503
+            )
+        return await call_next(request)
 
     def store(request: Request) -> Store:
         result = request.app.state.store
@@ -280,6 +308,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "current_query": f["query"],
                 "visible_count": len(rows),
                 "bind": "127.0.0.1",
+                "capture_policy": load_capture_policy(),
             },
         )
 
@@ -329,6 +358,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
             {
                 "stats": s.dashboard_stats(),
                 "bind": "127.0.0.1",
+                "capture_policy": load_capture_policy(),
                 "current_status": f["status"],
                 "current_range": f["range"],
                 "selected_tool": f["tool"],
@@ -345,6 +375,8 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
         row = s.query_by_id(request_id)
         if row is None:
             raise HTTPException(status_code=404, detail="request not found")
+        if row["erased_at"] is not None:
+            return templates.TemplateResponse(request, "partials/tombstone.html", {"row": row})
         requested_tab = request.query_params.get("tab", "body")
         if requested_tab not in _VALID_DETAIL_TABS:
             requested_tab = "body"
@@ -359,6 +391,16 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "content_type": content_type,
                 "active_tab": requested_tab,
             },
+        )
+
+    @app.get("/transparency", response_class=HTMLResponse)
+    async def transparency(request: Request) -> HTMLResponse:
+        """What upbox holds about this machine's user, for Article 15 requests."""
+        s = store(request)
+        return templates.TemplateResponse(
+            request,
+            "transparency.html",
+            {"report": build_report(s), "tools": s.per_tool_summary(), "selected_tool": None},
         )
 
     @app.get("/export")
@@ -397,6 +439,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "tools_yaml": settings.read_current("tools"),
                 "redact_yaml": settings.read_current("redact"),
                 "allowlist_yaml": settings.read_current("allowlist"),
+                "capture_yaml": settings.read_current("capture"),
                 "message": None,
                 "error": None,
             },
@@ -416,6 +459,7 @@ def create_app(db_path: Path = DEFAULT_DB_PATH) -> FastAPI:
                 "tools_yaml": settings.read_current("tools"),
                 "redact_yaml": settings.read_current("redact"),
                 "allowlist_yaml": settings.read_current("allowlist"),
+                "capture_yaml": settings.read_current("capture"),
                 "message": msg if ok else None,
                 "error": None if ok else msg,
             },

@@ -1083,3 +1083,13 @@ pre.body .red {
 .rules-block button:hover { filter: brightness(1.05); }
 .msg-ok  { color: var(--accent-2); background: var(--accent-2-soft); padding: 8px 12px; border-radius: 4px; }
 .msg-err { color: var(--danger);   background: var(--danger-soft);   padding: 8px 12px; border-radius: 4px; }
+
+/* ---------- Transparency report + tombstones ---------- */
+.report h3 { margin: 28px 0 10px; font-size: 14px; }
+.report-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.report-table th, .report-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.report-table th { color: var(--muted); font-weight: 500; }
+.report ul { padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.tombstone { padding: 18px; }
+.tombstone .name { color: var(--danger); }
+.capture-badge { color: var(--warn); border-color: var(--warn); }

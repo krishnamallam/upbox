@@ -461,3 +461,48 @@ def test_a_held_row_stops_the_deletion_run(tmp_store: Store) -> None:
     tmp_store.prune(RetentionPolicy(body_days=None, record_days=400), now=NOW)
 
     assert len(tmp_store.query_filtered()) == 2
+
+
+def test_prune_skips_rows_with_nothing_to_clear(tmp_store: Store) -> None:
+    tmp_store.insert_request(
+        _record(
+            NOW - timedelta(days=30),
+            body_excerpt=None,
+            headers_json=None,
+            omitted_fields='["body_excerpt", "headers_json"]',
+        )
+    )
+
+    result = tmp_store.prune(RetentionPolicy(body_days=7), now=NOW)
+
+    assert result.bodies_cleared == 0
+
+
+def test_prune_leaves_a_content_less_row_unstamped(tmp_store: Store) -> None:
+    tmp_store.insert_request(
+        _record(
+            NOW - timedelta(days=30),
+            body_excerpt=None,
+            headers_json=None,
+            omitted_fields='["body_excerpt", "headers_json"]',
+        )
+    )
+
+    tmp_store.prune(RetentionPolicy(body_days=7), now=NOW)
+
+    assert tmp_store.query_recent()[0]["pruned_at"] is None
+
+
+def test_dry_run_skips_rows_with_nothing_to_clear(tmp_store: Store) -> None:
+    tmp_store.insert_request(
+        _record(
+            NOW - timedelta(days=30),
+            body_excerpt=None,
+            headers_json=None,
+            omitted_fields='["body_excerpt", "headers_json"]',
+        )
+    )
+
+    preview = tmp_store.preview_prune(RetentionPolicy(body_days=7), now=NOW)
+
+    assert preview.bodies_cleared == 0

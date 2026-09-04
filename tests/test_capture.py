@@ -15,8 +15,15 @@ from typing import Any, cast
 import pytest
 from mitmproxy.test import tflow, tutils
 
+from upbox.addons import capture as capture_module
 from upbox.addons.capture import HEADER_REDACTION_MARKER, CaptureAddon
 from upbox.db.store import BODY_EXCERPT_MAX, Store
+
+
+@pytest.fixture(autouse=True)
+def _bundled_capture_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these tests independent of any capture.yaml on the developer's machine."""
+    monkeypatch.setattr(capture_module, "USER_RULES_PATH", tmp_path / "absent-capture.yaml")
 
 
 @pytest.fixture

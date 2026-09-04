@@ -136,6 +136,28 @@ limitation.
 Per-tool destination and volume data, exportable to CSV, feeds the
 record of processing activities.
 
+### Article 15: right of access
+
+`upbox report` produces, for the machine's user, the categories of data
+processed and whether each is stored, the recipients (destination hosts per
+tool), the retention period in force, the source (network observation on this
+machine), and how to obtain a copy (`--records`, or `upbox export --format
+audit`) and request erasure. The controller's identity is the deployer's to
+fill in; upbox states that explicitly rather than guessing. Bodies may contain
+personal data of third parties that upbox cannot separate from the user's own;
+the report says so.
+
+### Article 17: right to erasure
+
+`upbox erase` removes individual records on request. Because the audit log is a
+hash chain, a row cannot simply vanish without the log reading as tampered
+with; instead it becomes a tombstone that keeps only its timestamp, sequence
+number, and hashes. Every content column, including the body and header digests,
+is cleared. The erasure, its time, and its reason are disclosed by `upbox
+verify`, in every `upbox.audit.v1` export, and in the transparency report. A
+legal hold (`upbox hold`) refuses erasure until it is released, which is the
+Article 17(3)(e) case of data needed for legal claims.
+
 ### Article 32: security of processing
 
 Visibility and control over data leaving the endpoint. Local-only CA

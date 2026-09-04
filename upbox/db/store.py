@@ -30,7 +30,7 @@ DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
 # Bumped whenever _migrate gains a step. Fresh databases are created at the
 # final shape by schema.sql and then run every migration anyway; each one is
 # guarded so it is a no-op on an already-correct schema.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Columns added by the v2 hash-chain migration, with their affinities. seq must
 # be INTEGER: under TEXT affinity SQLite would store 10 as '10' and order it
@@ -50,9 +50,22 @@ _V3_RETENTION_COLUMNS = {
     "legal_hold": "INTEGER NOT NULL DEFAULT 0",
 }
 
+# Columns added by the v4 subject-rights migration. omitted_fields records what
+# capture.yaml told the proxy not to store; erased_at / erased_reason mark a
+# tombstone left by `upbox erase`.
+_V4_SUBJECT_RIGHTS_COLUMNS = {
+    "omitted_fields": "TEXT",
+    "erased_at": "TEXT",
+    "erased_reason": "TEXT",
+}
+
 # Text columns retention clears, paired with the digest column that keeps the
 # chain verifiable once the text is gone.
 PRUNABLE_CONTENT = (("body_excerpt", "body_excerpt_sha256"), ("headers_json", "headers_sha256"))
+# Body-tier retention only touches rows that still hold content. A row whose
+# content was never stored (capture.yaml) or already cleared has nothing to
+# clear, and stamping it would inflate the "cleared" count.
+_HAS_PRUNABLE_CONTENT = "(body_excerpt IS NOT NULL OR headers_json IS NOT NULL)"
 # Cap stored request bodies at 100 KB. The proxy still forwards the full body;
 # this only bounds what lands in the audit DB. ``body_hash`` covers the whole
 # body for integrity, ``req_bytes`` records the true size. Bigger than the old
@@ -84,19 +97,23 @@ class RequestRecord:
     req_bytes: int
     resp_bytes: int | None
     status: int | None
-    headers_json: str
+    headers_json: str | None
     body_excerpt: str | None
     body_hash: str | None
     redactions_applied_json: str | None
     enforcement: str | None
+    # JSON list of content columns the capture policy withheld, or None when
+    # everything was stored. Mirrors pruned_fields so "never stored" and
+    # "cleared later" stay distinguishable.
+    omitted_fields: str | None = None
 
 
 _INSERT_COLUMNS = (
     "ts, tool, method, scheme, host, path, req_bytes, resp_bytes, status, "
     "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement, "
-    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256"
+    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256, omitted_fields"
 )
-_INSERT_PLACEHOLDERS = ", ".join("?" * 19)
+_INSERT_PLACEHOLDERS = ", ".join("?" * 20)
 
 
 class ReadOnlyStoreError(RuntimeError):
@@ -138,6 +155,83 @@ class ChainVerification:
     # across those gaps, but an export must disclose them: the surviving chain
     # says nothing about what was in the deleted range.
     entries_deleted: int = 0
+    # Entries erased on request. Their hashes still link, so verification
+    # passes through them, but their content cannot be recomputed and an
+    # export must say how many there are.
+    entries_erased: int = 0
+
+
+# Every column `erase` nulls. Verification insists that a tombstone has all
+# fifteen null: otherwise marking a row erased would be a way to skip its
+# recomputation while leaving altered content in view.
+TOMBSTONE_CLEARED_COLUMNS = (
+    "tool",
+    "method",
+    "scheme",
+    "host",
+    "path",
+    "req_bytes",
+    "resp_bytes",
+    "status",
+    "headers_json",
+    "body_excerpt",
+    "body_hash",
+    "redactions_applied_json",
+    "enforcement",
+    "headers_sha256",
+    "body_excerpt_sha256",
+)
+
+
+@dataclass(frozen=True)
+class EraseSelection:
+    """Which rows `erase` acts on. Selectors AND-combine; erased rows never match."""
+
+    ids: tuple[int, ...] = ()
+    host: str | None = None
+    tool: str | None = None
+    since: str | None = None
+    until: str | None = None
+
+    def is_empty(self) -> bool:
+        return not (self.ids or self.host or self.tool or self.since or self.until)
+
+    def where(self) -> tuple[str, list[Any]]:
+        clauses = ["erased_at IS NULL"]
+        params: list[Any] = []
+        if self.ids:
+            clauses.append(f"id IN ({', '.join('?' * len(self.ids))})")
+            params.extend(self.ids)
+        if self.host:
+            clauses.append("host = ?")
+            params.append(self.host)
+        if self.tool:
+            clauses.append("tool = ?")
+            params.append(self.tool)
+        if self.since:
+            clauses.append("ts >= ?")
+            params.append(self.since)
+        if self.until:
+            clauses.append("ts <= ?")
+            params.append(self.until)
+        return " AND ".join(clauses), params
+
+
+@dataclass(frozen=True)
+class EraseResult:
+    """What `erase` did: chained rows became tombstones, pre-v0.2 rows were deleted."""
+
+    erased: int
+    deleted_unchained: int
+    ids: tuple[int, ...]
+
+
+class LegalHoldError(RuntimeError):
+    """Raised, before anything is written, when a selected row is under legal hold."""
+
+    def __init__(self, held_ids: tuple[int, ...]) -> None:
+        super().__init__(f"{len(held_ids)} matching row(s) are under legal hold: {held_ids}")
+        self.held_ids = held_ids
 
 
 class Store:
@@ -200,6 +294,8 @@ class Store:
             self._migrate_v2_chain()
         if version < 3:
             self._migrate_v3_retention()
+        if version < 4:
+            self._migrate_v4_subject_rights()
         self._conn.execute(
             "INSERT INTO schema_version (id, version) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
@@ -209,6 +305,11 @@ class Store:
     def _schema_version(self) -> int:
         row = self._conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
         return int(row[0]) if row is not None else 0
+
+    @property
+    def schema_version(self) -> int:
+        """Version recorded in the database, 0 for a pre-v0.2 file."""
+        return self._schema_version()
 
     def _request_columns(self) -> set[str]:
         return {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
@@ -243,6 +344,12 @@ class Store:
     def _migrate_v3_retention(self) -> None:
         columns = self._request_columns()
         for name, definition in _V3_RETENTION_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
+
+    def _migrate_v4_subject_rights(self) -> None:
+        columns = self._request_columns()
+        for name, definition in _V4_SUBJECT_RIGHTS_COLUMNS.items():
             if name not in columns:
                 self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
 
@@ -307,6 +414,7 @@ class Store:
                     entry_hash,
                     headers_sha256,
                     body_excerpt_sha256,
+                    record.omitted_fields,
                 ),
             )
             self._conn.execute(
@@ -388,7 +496,8 @@ class Store:
             bodies = int(
                 self._conn.execute(
                     "SELECT COUNT(*) FROM requests "
-                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL "
+                    f"AND {_HAS_PRUNABLE_CONTENT}",
                     (body_cutoff.isoformat(),),
                 ).fetchone()[0]
             )
@@ -445,7 +554,8 @@ class Store:
                 cursor = self._conn.execute(
                     "UPDATE requests SET body_excerpt = NULL, headers_json = NULL, "
                     "pruned_at = ?, pruned_fields = ? "
-                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL",
+                    "WHERE ts < ? AND legal_hold = 0 AND pruned_at IS NULL "
+                    f"AND {_HAS_PRUNABLE_CONTENT}",
                     (stamp, cleared_columns, body_cutoff.isoformat()),
                 )
                 bodies_cleared = cursor.rowcount
@@ -536,6 +646,54 @@ class Store:
             )
         return cursor.rowcount
 
+    def preview_erase(self, selection: EraseSelection) -> list[sqlite3.Row]:
+        """Rows `erase` would act on, holds included so a caller can refuse."""
+        where, params = selection.where()
+        return list(self._conn.execute(f"SELECT * FROM requests WHERE {where} ORDER BY id", params))
+
+    def erase(
+        self, selection: EraseSelection, reason: str, now: datetime | None = None
+    ) -> EraseResult:
+        """Erase the selected rows on request, keeping the chain intact.
+
+        Chained rows become tombstones: every content column is nulled and
+        ``erased_at`` / ``erased_reason`` are set, while ``ts``, ``seq``,
+        ``prev_hash`` and ``entry_hash`` survive so the chain still links and
+        retention can still age the row out. Rows that predate the chain are
+        deleted outright. A legal hold on any selected row refuses the whole
+        operation before anything is written.
+        """
+        if selection.is_empty():
+            raise ValueError("erase needs at least one selector")
+        if not reason.strip():
+            raise ValueError("erase needs a reason")
+        stamp = (now if now is not None else datetime.now(UTC)).isoformat()
+        cleared = ", ".join(f"{column} = NULL" for column in TOMBSTONE_CLEARED_COLUMNS)
+        with self._write_transaction():
+            rows = self.preview_erase(selection)
+            held = tuple(int(row["id"]) for row in rows if row["legal_hold"])
+            if held:
+                raise LegalHoldError(held)
+            chained = [int(row["id"]) for row in rows if row["seq"] is not None]
+            unchained = [int(row["id"]) for row in rows if row["seq"] is None]
+            if chained:
+                self._conn.execute(
+                    f"UPDATE requests SET {cleared}, pruned_at = NULL, pruned_fields = NULL, "
+                    "omitted_fields = NULL, erased_at = ?, erased_reason = ? "
+                    f"WHERE id IN ({', '.join('?' * len(chained))})",
+                    (stamp, reason, *chained),
+                )
+            if unchained:
+                self._conn.execute(
+                    f"DELETE FROM requests WHERE id IN ({', '.join('?' * len(unchained))})",
+                    tuple(unchained),
+                )
+        return EraseResult(
+            erased=len(chained),
+            deleted_unchained=len(unchained),
+            ids=tuple(chained + unchained),
+        )
+
     def _gaps_by_start(self) -> dict[int, sqlite3.Row]:
         return {
             int(row["seq_start"]): row
@@ -564,6 +722,7 @@ class Store:
         checked = 0
         content_unavailable = 0
         entries_deleted = 0
+        entries_erased = 0
         first_seq: int | None = None
         last_seq: int | None = None
 
@@ -579,6 +738,7 @@ class Store:
                 detail=detail,
                 content_unavailable=content_unavailable,
                 entries_deleted=entries_deleted,
+                entries_erased=entries_erased,
             )
 
         def skip_recorded_gaps(stop_at: int | None) -> str | None:
@@ -619,6 +779,22 @@ class Store:
                 return broken(seq, f"sequence gap: expected seq {expected_seq}, found {seq}")
             if row["prev_hash"] != expected_prev:
                 return broken(seq, f"seq {seq} does not link to the previous entry")
+
+            if row["erased_at"] is not None:
+                # A tombstone cannot be recomputed: its inputs are gone. It is
+                # accepted on linkage alone, counted, and disclosed. It must be
+                # fully empty, or "erased" becomes a way to hide an edit.
+                leftover = [c for c in TOMBSTONE_CLEARED_COLUMNS if row[c] is not None]
+                if leftover:
+                    return broken(
+                        seq, f"seq {seq} is marked erased but still carries content ({leftover[0]})"
+                    )
+                entries_erased += 1
+                expected_prev = str(row["entry_hash"])
+                expected_seq = seq + 1
+                last_seq = seq
+                continue
+
             recomputed = chain.entry_hash(chain.chain_payload(_row_to_dict(row)))
             if recomputed != row["entry_hash"]:
                 return broken(seq, f"seq {seq} does not match its recorded hash")
@@ -671,6 +847,7 @@ class Store:
                 last_seq=None,
                 head_hash=stored_head,
                 entries_deleted=entries_deleted,
+                entries_erased=entries_erased,
             )
 
         return ChainVerification(
@@ -682,12 +859,13 @@ class Store:
             head_hash=stored_head,
             content_unavailable=content_unavailable,
             entries_deleted=entries_deleted,
+            entries_erased=entries_erased,
         )
 
     def query_recent(self, limit: int = 100) -> list[sqlite3.Row]:
         return list(
             self._conn.execute(
-                "SELECT * FROM requests ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM requests WHERE erased_at IS NULL ORDER BY id DESC LIMIT ?",
                 (limit,),
             )
         )
@@ -708,8 +886,12 @@ class Store:
         search: str | None = None,
         order: str = "ASC",
         limit: int | None = None,
+        include_erased: bool = False,
     ) -> list[sqlite3.Row]:
         """Filtered query. All filters are AND-combined.
+
+        ``include_erased`` is for the audit export, which must disclose
+        tombstones; every dashboard path leaves it off and never sees them.
 
         ``status`` is one of ``forwarded``/``redacted``/``flagged``/``blocked``
         and shapes the badge on each row. ``flagged`` and ``blocked`` are
@@ -722,6 +904,8 @@ class Store:
         """
         clauses: list[str] = []
         params: list[Any] = []
+        if not include_erased:
+            clauses.append("erased_at IS NULL")
         if since:
             clauses.append("ts >= ?")
             params.append(since)
@@ -773,6 +957,7 @@ class Store:
                 SUM(CASE WHEN enforcement = 'blocked' THEN 1 ELSE 0 END) AS blocked,
                 COALESCE(SUM(req_bytes), 0) AS total_bytes
             FROM requests
+            WHERE erased_at IS NULL
             """
         ).fetchone()
         return cast("sqlite3.Row", row)
@@ -788,14 +973,88 @@ class Store:
                     COALESCE(SUM(req_bytes), 0) AS total_req_bytes,
                     SUM(CASE WHEN enforcement = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
                 FROM requests
+                WHERE erased_at IS NULL
                 GROUP BY tool
                 ORDER BY request_count DESC
                 """
             )
         )
 
+    def omitted_content_count(self) -> int:
+        """Live rows whose body or headers were never stored under the capture policy."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM requests WHERE omitted_fields IS NOT NULL AND erased_at IS NULL"
+        ).fetchone()
+        return int(row[0])
+
+    def live_row_summary(self) -> sqlite3.Row:
+        """Count, time span, and bytes over rows that have not been erased."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total, MIN(ts) AS first_ts, MAX(ts) AS last_ts, "
+            "COALESCE(SUM(req_bytes), 0) AS total_bytes FROM requests WHERE erased_at IS NULL"
+        ).fetchone()
+        return cast("sqlite3.Row", row)
+
+    def recipients(self) -> list[sqlite3.Row]:
+        """Per tool and destination host: how much went where, and when."""
+        return list(
+            self._conn.execute(
+                """
+                SELECT
+                    COALESCE(tool, 'Unknown')   AS tool,
+                    host,
+                    COUNT(*)                    AS requests,
+                    COALESCE(SUM(req_bytes), 0) AS req_bytes,
+                    MIN(ts)                     AS first_seen,
+                    MAX(ts)                     AS last_seen
+                FROM requests
+                WHERE erased_at IS NULL
+                GROUP BY COALESCE(tool, 'Unknown'), host
+                ORDER BY requests DESC, tool, host
+                """
+            )
+        )
+
+    def erasures(self) -> list[sqlite3.Row]:
+        """Every tombstone: when the request happened, when it was erased, and why."""
+        return list(
+            self._conn.execute(
+                "SELECT ts, erased_at, erased_reason FROM requests "
+                "WHERE erased_at IS NOT NULL ORDER BY erased_at, seq"
+            )
+        )
+
+    def pruned_content_count(self) -> int:
+        """Live rows whose body or headers were cleared by retention."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM requests WHERE pruned_at IS NOT NULL AND erased_at IS NULL"
+        ).fetchone()
+        return int(row[0])
+
+    def legal_hold_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM requests WHERE legal_hold = 1").fetchone()
+        return int(row[0])
+
+    def deleted_entry_count(self) -> int:
+        """Entries removed by retention, derived from the recorded gap ranges.
+
+        Derived from the ranges rather than read from ``entry_count`` for the
+        same reason verification does it: a forged count must not be able to
+        change what a report discloses.
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(seq_end - seq_start + 1), 0) FROM chain_gaps"
+        ).fetchone()
+        return int(row[0])
+
+    def latest_checkpoint(self) -> sqlite3.Row | None:
+        row = self._conn.execute(
+            "SELECT * FROM chain_checkpoints ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return cast("sqlite3.Row | None", row)
+
     def iter_all(self) -> Iterator[sqlite3.Row]:
-        yield from self._conn.execute("SELECT * FROM requests ORDER BY id")
+        yield from self._conn.execute("SELECT * FROM requests WHERE erased_at IS NULL ORDER BY id")
 
     def export_jsonl(self, out: IO[str], rows: Iterable[sqlite3.Row] | None = None) -> int:
         """Write one JSON object per line. Returns the count written."""

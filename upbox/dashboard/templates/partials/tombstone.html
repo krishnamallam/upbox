@@ -1,0 +1,8 @@
+<div class="detail-head tombstone">
+  <div class="title">
+    <span class="name">Erased on request</span>
+    <span class="ts mono">#{{ '%06d' % row['id'] }} · request at {{ row['ts'] }}</span>
+  </div>
+  <p class="muted">Erased {{ row['erased_at'] }}. Reason: {{ row['erased_reason'] }}</p>
+  <p class="muted small">Tool, host, path, sizes, headers, body and hashes were cleared. The row keeps its chain position (seq {{ row['seq'] }}) so <code>upbox verify</code> still links through it and reports it as erased.</p>
+</div>

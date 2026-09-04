@@ -6,9 +6,11 @@ import asyncio
 import os
 from pathlib import Path
 
+from upbox.addons.capture import CaptureAddon, CapturePolicy
 from upbox.addons.enforce import EnforceAddon
 from upbox.addons.fingerprint import FingerprintAddon
 from upbox.addons.redact import RedactAddon
+from upbox.db.store import Store
 from upbox.watch import RuleReloadWatcher, build_rule_watch_targets, watch_rules
 
 # A timestamp far in the future, used to force a detectable mtime change
@@ -110,19 +112,21 @@ async def test_watch_survives_raising_reloader(tmp_path: Path) -> None:
     assert ok
 
 
-def test_build_targets_pairs_each_addon_path_with_its_reload() -> None:
-    from upbox.addons import enforce, fingerprint, redact
+def test_build_targets_pairs_each_addon_path_with_its_reload(tmp_path: Path) -> None:
+    from upbox.addons import capture, enforce, fingerprint, redact
 
     fp = FingerprintAddon()
     rd = RedactAddon()
     en = EnforceAddon()
+    cp = CaptureAddon(Store(tmp_path / "t.db"), CapturePolicy())
 
-    targets = build_rule_watch_targets(fp, rd, en)
+    targets = build_rule_watch_targets(fp, rd, en, cp)
 
     assert targets == [
         (fingerprint.USER_RULES_PATH, fp.reload),
         (redact.USER_RULES_PATH, rd.reload),
         (enforce.USER_RULES_PATH, en.reload),
+        (capture.USER_RULES_PATH, cp.reload),
     ]
 
 

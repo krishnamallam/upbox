@@ -2,7 +2,7 @@
 
 A poll loop on mitmproxy's event loop watches each rule file's mtime and
 calls the matching addon ``reload()`` when it changes — so dashboard edits
-to ``tools.yaml`` / ``redact.yaml`` / ``allowlist.yaml`` apply without an
+to ``tools.yaml`` / ``redact.yaml`` / ``allowlist.yaml`` / ``capture.yaml`` apply without an
 ``upbox start`` restart. Reloading the TLS interception set (``allow_hosts``)
 is out of scope: a brand-new intercepted host still needs a restart.
 """
@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from upbox.addons.capture import CaptureAddon
     from upbox.addons.enforce import EnforceAddon
     from upbox.addons.fingerprint import FingerprintAddon
     from upbox.addons.redact import RedactAddon
@@ -68,8 +69,10 @@ def build_rule_watch_targets(
     fingerprint: FingerprintAddon,
     redact: RedactAddon,
     enforce: EnforceAddon,
+    capture: CaptureAddon,
 ) -> list[Target]:
     """Pair each rule file (each addon module's own path constant) with its reload."""
+    from upbox.addons import capture as capture_mod
     from upbox.addons import enforce as enforce_mod
     from upbox.addons import fingerprint as fingerprint_mod
     from upbox.addons import redact as redact_mod
@@ -78,6 +81,7 @@ def build_rule_watch_targets(
         (fingerprint_mod.USER_RULES_PATH, fingerprint.reload),
         (redact_mod.USER_RULES_PATH, redact.reload),
         (enforce_mod.USER_RULES_PATH, enforce.reload),
+        (capture_mod.USER_RULES_PATH, capture.reload),
     ]
 
 

@@ -260,3 +260,46 @@ def test_record_count_reflects_the_filter(tmp_store: Store) -> None:
     tmp_store.insert_request(_record(tool="copilot"))
 
     assert _header(tmp_store, tool="cursor")["record_count"] == 1
+
+
+# --- capture policy and erasure disclosures ---------------------------------
+
+
+def test_header_records_the_capture_policy_digest(tmp_store: Store) -> None:
+    tmp_store.insert_request(_record())
+
+    assert len(_header(tmp_store)["ruleset"]["capture_sha256"]) == 64
+
+
+def test_header_counts_rows_with_omitted_content(tmp_store: Store) -> None:
+    tmp_store.insert_request(
+        _record(
+            body_excerpt=None, headers_json=None, omitted_fields='["body_excerpt", "headers_json"]'
+        )
+    )
+
+    assert _header(tmp_store)["chain"]["content_omitted_by_capture_policy"] == 1
+
+
+def test_omitted_body_is_not_reported_as_untruncated(tmp_store: Store) -> None:
+    tmp_store.insert_request(_record(body_excerpt=None, omitted_fields='["body_excerpt"]'))
+
+    assert _export(tmp_store)[1]["body_truncated"] is None
+
+
+def test_record_carries_the_omitted_fields(tmp_store: Store) -> None:
+    tmp_store.insert_request(_record(body_excerpt=None, omitted_fields='["body_excerpt"]'))
+
+    assert _export(tmp_store)[1]["capture"]["omitted_fields"] == ["body_excerpt"]
+
+
+def test_full_record_reports_nothing_omitted(tmp_store: Store) -> None:
+    tmp_store.insert_request(_record())
+
+    assert _export(tmp_store)[1]["capture"]["omitted_fields"] is None
+
+
+def test_header_reports_zero_erasures_on_an_untouched_log(tmp_store: Store) -> None:
+    tmp_store.insert_request(_record())
+
+    assert _header(tmp_store)["chain"]["entries_erased_on_request"] == 0

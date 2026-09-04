@@ -253,3 +253,27 @@ def test_migrated_db_backfills_old_blocked_rows_as_flagged(tmp_path: Path) -> No
 
     assert len(rows) == 1
     assert rows[0]["enforcement"] == "flagged"
+
+
+def test_insert_request_stores_omitted_fields(tmp_store: Store) -> None:
+    tmp_store.insert_request(
+        RequestRecord(
+            ts="2026-09-04T09:00:00+00:00",
+            tool="Cursor",
+            method="POST",
+            scheme="https",
+            host="api.cursor.sh",
+            path="/v1/chat",
+            req_bytes=42,
+            resp_bytes=100,
+            status=200,
+            headers_json=None,
+            body_excerpt=None,
+            body_hash="deadbeef",
+            redactions_applied_json=None,
+            enforcement=None,
+            omitted_fields='["body_excerpt", "headers_json"]',
+        )
+    )
+
+    assert tmp_store.query_recent()[0]["omitted_fields"] == '["body_excerpt", "headers_json"]'

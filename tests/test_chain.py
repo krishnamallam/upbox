@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from upbox.db import chain
-from upbox.db.store import ReadOnlyStoreError, RequestRecord, Store
+from upbox.db.store import SCHEMA_VERSION, ReadOnlyStoreError, RequestRecord, Store
 
 
 @pytest.fixture
@@ -450,3 +450,16 @@ def test_redactions_column_is_chained(tmp_store: Store) -> None:
     tmp_store._conn.execute("UPDATE requests SET redactions_applied_json = '[]' WHERE seq = 1")
 
     assert tmp_store.verify_chain().status == "broken"
+
+
+def test_v3_database_gains_the_subject_rights_columns(v3_db: Path) -> None:
+    store = Store(v3_db)
+    columns = {row[1] for row in store._conn.execute("PRAGMA table_info(requests)")}
+
+    assert {"omitted_fields", "erased_at", "erased_reason"} <= columns
+
+
+def test_migrated_v3_database_reports_the_current_schema_version(v3_db: Path) -> None:
+    store = Store(v3_db)
+
+    assert store.schema_version == SCHEMA_VERSION
