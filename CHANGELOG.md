@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.1 (unreleased)
+
+### Fixed
+
+- **The Windows executable has the upbox icon.** v0.4.0 shipped with
+  PyInstaller's default icon because the spec never set one. The icon is
+  rasterised from the site mark by `packaging/make_icon.py` into a seven-size
+  `.ico`.
+- **Double-clicking `upbox.exe` explains itself instead of vanishing.** upbox
+  is a command-line tool; opening the exe from Explorer used to flash a console
+  that printed the help and closed. When the binary is launched with no
+  arguments from a console it owns alone, it now prints the two commands to run
+  from PowerShell and waits for Enter. Launching from a terminal is unchanged.
+
 ## v0.4.0 (2026-09-04)
 
 ### Added

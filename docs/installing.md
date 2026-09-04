@@ -73,6 +73,17 @@ shows "Windows protected your PC" once: click "More info", then "Run anyway".
 PyInstaller one-file binaries occasionally trip Defender's heuristics; if the
 file is quarantined, install with pipx instead and tell us in an issue.
 
+upbox is a command-line tool, so double-clicking `upbox.exe` does not start
+anything: it opens a window that explains the two commands and waits for Enter.
+Run it from PowerShell instead:
+
+```powershell
+.\upbox.exe init     # one-time CA install
+.\upbox.exe start    # needs an administrator PowerShell: right-click, Run as administrator
+```
+
+Once `upbox.exe` is on `PATH`, drop the `.\` prefix.
+
 ### Linux
 
 ```sh
