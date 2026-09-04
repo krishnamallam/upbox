@@ -4,9 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  # Manual runs build and smoke-test the binaries on all three platforms
+  # without publishing anything, so the pipeline can be exercised on a branch.
+  workflow_dispatch:
 
 jobs:
   publish:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # PyPI trusted publishing (preferred). Set up at
     # https://pypi.org/manage/account/publishing/ — no long-lived token
@@ -56,5 +60,110 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/*
+          # Only the distributions. `uv build` also leaves a .gitignore in
+          # dist/, which a bare dist/* glob used to attach as default.gitignore.
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
           fail_on_unmatched_files: true
+
+  binaries:
+    # Runs after the release exists so the assets attach to it. On a manual
+    # run there is no release: build and smoke-test only, keep the artifacts.
+    needs: publish
+    if: always() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04 rather than latest: a PyInstaller binary needs a glibc
+          # at least as new as the build host's, and 22.04's 2.35 covers
+          # Debian 12, Ubuntu 22.04+, Fedora 36+.
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            binary: dist/upbox
+          - os: macos-latest
+            platform: macos-arm64
+            binary: dist/upbox
+          - os: windows-latest
+            platform: windows-x86_64
+            binary: dist/upbox.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+
+      # PyInstaller must run inside the same environment that installed
+      # mitmproxy: the mitmproxy_rs Linux hook resolves the local-mode
+      # redirector through that environment's scripts directory.
+      - name: Install build environment
+        run: uv sync --group build --frozen
+
+      - name: Build one-file binary
+        run: uv run pyinstaller --noconfirm packaging/upbox.spec
+
+      - name: Smoke-test the binary
+        run: packaging/smoke.sh "${{ matrix.binary }}"
+
+      - name: Package
+        id: package
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            version="${REF_NAME#v}"
+          else
+            version="dev-$(git rev-parse --short HEAD)"
+          fi
+          mkdir -p out
+          case "$PLATFORM" in
+            linux-*)
+              asset="upbox-${version}-${PLATFORM}.tar.gz"
+              tar -czf "out/$asset" -C dist upbox
+              ;;
+            macos-*)
+              asset="upbox-${version}-${PLATFORM}.dmg"
+              mkdir -p stage
+              cp dist/upbox stage/upbox
+              cp packaging/README.txt stage/README.txt
+              hdiutil create -volname upbox -srcfolder stage -ov -format UDZO "out/$asset"
+              ;;
+            windows-*)
+              asset="upbox-${version}-${PLATFORM}.exe"
+              cp dist/upbox.exe "out/$asset"
+              ;;
+          esac
+          cd out
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" > "$asset.sha256"
+          fi
+          ls -la
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Attach to the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: gh release upload "$REF_NAME" out/* --clobber
