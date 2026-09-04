@@ -224,8 +224,8 @@ def render_markdown(report: TransparencyReport) -> str:
         "",
         "## 4. Retention",
         "",
-        f"- Bodies and headers are cleared after {_days(report.body_days)}.",
-        f"- Whole records are deleted after {_days(report.record_days)}.",
+        f"- Bodies and headers: {_retention('cleared', report.body_days)}.",
+        f"- Whole records: {_retention('deleted', report.record_days)}.",
         f"- Rows with content cleared by retention: {report.rows_with_pruned_content}.",
         f"- Entries deleted by retention (disclosed as chain gaps): "
         f"{report.entries_deleted_by_retention}.",
@@ -285,5 +285,5 @@ def render_markdown(report: TransparencyReport) -> str:
     return "\n".join(lines)
 
 
-def _days(value: int | None) -> str:
-    return "never (kept indefinitely)" if value is None else f"{value} day(s)"
+def _retention(verb: str, days: int | None) -> str:
+    return "kept indefinitely" if days is None else f"{verb} after {days} day(s)"

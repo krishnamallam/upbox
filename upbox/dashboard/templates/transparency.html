@@ -44,8 +44,8 @@
 
   <h3>4. Retention</h3>
   <ul>
-    <li>Bodies and headers are cleared after {{ report.body_days ~ ' day(s)' if report.body_days is not none else 'never (kept indefinitely)' }}.</li>
-    <li>Whole records are deleted after {{ report.record_days ~ ' day(s)' if report.record_days is not none else 'never (kept indefinitely)' }}.</li>
+    <li>Bodies and headers: {{ 'cleared after ' ~ report.body_days ~ ' day(s)' if report.body_days is not none else 'kept indefinitely' }}.</li>
+    <li>Whole records: {{ 'deleted after ' ~ report.record_days ~ ' day(s)' if report.record_days is not none else 'kept indefinitely' }}.</li>
     <li>Rows with content cleared by retention: {{ report.rows_with_pruned_content }}.</li>
     <li>Entries deleted by retention (disclosed as chain gaps): {{ report.entries_deleted_by_retention }}.</li>
     <li>Rows under legal hold: {{ report.rows_under_legal_hold }}.</li>
