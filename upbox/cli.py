@@ -248,6 +248,11 @@ def verify() -> None:
             f"{result.content_unavailable} stored body/header value(s) were cleared by "
             "retention. Their digests still verify; the content cannot be re-checked."
         )
+    if result.entries_erased:
+        typer.echo(
+            f"{result.entries_erased} entry/entries were erased at the data subject's request. "
+            "Their hashes still link; their content cannot be re-checked."
+        )
 
     typer.echo(f"Head: {result.head_hash}")
     if result.status != "broken":
@@ -296,6 +301,14 @@ def doctor() -> None:
         typer.echo(
             "  ACTION: the audit log contains prompt bodies. Turn on full-disk encryption.",
         )
+
+    from upbox.addons.capture import load_policy as load_capture_policy
+
+    policy = load_capture_policy()
+    typer.echo("")
+    typer.echo("Capture policy (~/.upbox/rules/capture.yaml):")
+    typer.echo(f"  Bodies stored:        {_yn(policy.bodies)}")
+    typer.echo(f"  Headers stored:       {_yn(policy.headers)}")
 
     if db.exists():
         with Store(db, read_only=True) as store:
@@ -391,6 +404,79 @@ def _normalise_bound(value: str, *, end_of_day: bool) -> str | None:
             raise typer.Exit(code=2) from None
         return f"{value}T23:59:59.999999" if end_of_day else f"{value}T00:00:00"
     return value
+
+
+@app.command()
+def erase(
+    reason: str = typer.Option(
+        ..., "--reason", help="Why these rows are being erased. Stored on every tombstone."
+    ),
+    ids: list[int] | None = typer.Option(None, "--id", help="Row id, repeatable."),  # noqa: B008
+    host: str = typer.Option("", help="Exact destination host."),
+    tool: str = typer.Option("", help="Exact tool name."),
+    since: str = typer.Option("", help="Rows with ts >= this ISO timestamp or date."),
+    until: str = typer.Option("", help="Rows with ts <= this ISO timestamp or date."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would go, change nothing."),
+) -> None:
+    """Erase requests on request (GDPR Article 17) without breaking the chain.
+
+    Chained rows become tombstones: content gone, ``seq`` and hashes kept, so
+    ``upbox verify`` still passes and reports them as erased. Rows that predate
+    the chain are deleted outright. A legal hold on any selected row refuses the
+    whole operation.
+    """
+    from upbox.db.store import EraseSelection, LegalHoldError, Store
+
+    if not reason.strip():
+        typer.echo("error: --reason must not be blank.", err=True)
+        raise typer.Exit(code=2)
+    selection = EraseSelection(
+        ids=tuple(ids or ()),
+        host=host or None,
+        tool=tool or None,
+        since=_normalise_bound(since, end_of_day=False),
+        until=_normalise_bound(until, end_of_day=True),
+    )
+    if selection.is_empty():
+        typer.echo(
+            "error: erase needs at least one selector: --id, --host, --tool, --since, --until.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    with Store() as store:
+        matches = store.preview_erase(selection)
+        if not matches:
+            typer.echo("nothing to erase: no rows match.")
+            return
+        if dry_run:
+            shown = ", ".join(str(row["id"]) for row in matches[:20])
+            more = f" and {len(matches) - 20} more" if len(matches) > 20 else ""
+            stamps = [str(row["ts"]) for row in matches]
+            typer.echo(f"Would erase {len(matches)} row(s): ids {shown}{more}.")
+            typer.echo(f"Oldest {min(stamps)}, newest {max(stamps)}.")
+            typer.echo("--dry-run: nothing was changed.")
+            return
+        try:
+            result = store.erase(selection, reason)
+        except LegalHoldError as exc:
+            held = ", ".join(str(i) for i in exc.held_ids)
+            typer.echo(
+                f"refused: {len(exc.held_ids)} matching row(s) are under legal hold (ids {held}). "
+                "Nothing was changed. Release the hold first with `upbox hold --release`.",
+                err=True,
+            )
+            raise typer.Exit(code=1) from None
+
+    typer.echo(
+        f"erased {result.erased} row(s). Tombstones keep seq, hashes and timestamp; "
+        "content is gone. `upbox verify` reports them as erased on request."
+    )
+    if result.deleted_unchained:
+        typer.echo(
+            f"deleted {result.deleted_unchained} row(s) that predate the chain outright; "
+            "they had no chain position to preserve."
+        )
 
 
 @app.command()
