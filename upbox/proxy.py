@@ -184,6 +184,7 @@ async def _run(
     fingerprint = FingerprintAddon()
     enforce = EnforceAddon()
     redact = RedactAddon()
+    capture = CaptureAddon(store)
     # Order matters: fingerprint tags the tool, enforce checks the destination
     # (and may short-circuit with a 403), redact rewrites the body, then
     # capture (response hook) persists the final state including
@@ -192,8 +193,8 @@ async def _run(
         fingerprint,
         enforce,
         redact,
-        CaptureAddon(store),
-        RuleReloadWatcher(build_rule_watch_targets(fingerprint, redact, enforce)),
+        capture,
+        RuleReloadWatcher(build_rule_watch_targets(fingerprint, redact, enforce, capture)),
         RetentionRunner(store),
     )
 

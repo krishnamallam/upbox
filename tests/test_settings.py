@@ -97,3 +97,25 @@ def test_write_cleans_up_temp_file_when_replace_fails(
         settings.validate_and_write("redact", '- name: t\n  pattern: "X"\n  replace: "Y"\n')
 
     assert list(tmp_rules_dir.iterdir()) == []
+
+
+def test_read_current_capture_falls_back_to_bundled_default(tmp_rules_dir: Path) -> None:
+    assert "bodies: true" in settings.read_current("capture")
+
+
+def test_validate_and_write_accepts_capture_yaml(tmp_rules_dir: Path) -> None:
+    ok, _ = settings.validate_and_write("capture", "bodies: false\nheaders: true\n")
+
+    assert ok
+
+
+def test_validate_and_write_rejects_non_boolean_capture_value(tmp_rules_dir: Path) -> None:
+    ok, _ = settings.validate_and_write("capture", "bodies: sometimes\n")
+
+    assert not ok
+
+
+def test_validate_and_write_rejects_unknown_capture_key(tmp_rules_dir: Path) -> None:
+    ok, _ = settings.validate_and_write("capture", "responses: true\n")
+
+    assert not ok

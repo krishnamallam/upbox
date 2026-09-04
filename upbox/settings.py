@@ -24,6 +24,7 @@ SCHEMAS: dict[str, type] = {
     "tools": list,
     "redact": list,
     "allowlist": dict,
+    "capture": dict,
 }
 
 
@@ -88,4 +89,9 @@ def _structurally_valid(kind: str, parsed: Any) -> bool:
             if not isinstance(tool, str) or not isinstance(entry, dict):
                 return False
         return True
+    if kind == "capture":
+        if not isinstance(parsed, dict):
+            return False
+        allowed = {"bodies", "headers"}
+        return set(parsed) <= allowed and all(isinstance(v, bool) for v in parsed.values())
     return False

@@ -617,3 +617,9 @@ def test_format_body_form_aligns_unequal_key_widths() -> None:
 def test_format_body_ndjson_handles_crlf_line_endings() -> None:
     result = _format_body('{"a":1}\r\n{"b":2}', "application/x-ndjson")
     assert result == '{\n  "a": 1\n}\n\n{\n  "b": 2\n}'
+
+
+def test_settings_page_offers_capture_editor(client: TestClient) -> None:
+    response = client.get("/settings")
+
+    assert "capture.yaml" in response.text

@@ -55,6 +55,15 @@
     </form>
   </details>
 
-  <p class="muted small">Edits write to <code>~/.upbox/rules/</code>. Restart <code>upbox start</code> to apply.</p>
+  <details class="rules-block">
+    <summary><strong>Capture policy</strong> (<code>capture.yaml</code>)</summary>
+    <p class="muted small">Set <code>bodies</code> and <code>headers</code> to <code>false</code> for metadata-only mode. Sizes, hashes, hosts and tools are always recorded.</p>
+    <form method="post" action="/settings/capture">
+      <textarea name="content" rows="8">{{ capture_yaml }}</textarea>
+      <button type="submit">Save</button>
+    </form>
+  </details>
+
+  <p class="muted small">Edits write to <code>~/.upbox/rules/</code>. The running proxy applies them within about two seconds; only a brand-new intercepted host needs a restart.</p>
 </div>
 {% endblock %}
