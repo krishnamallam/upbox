@@ -22,6 +22,7 @@ uv run upbox --help                             # CLI from the checkout, no inst
 uv run upbox proxy                              # proxy alone, explicit-proxy mode, no root needed
 uv run upbox dashboard                          # dashboard alone, reads ~/.upbox/upbox.db
 uv run upbox start                              # supervisor: both children + OS-level capture (needs admin/root)
+uv sync --group build && uv run pyinstaller packaging/upbox.spec && packaging/smoke.sh dist/upbox   # one-file binary
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff check, ruff format --check, mypy, and pytest on Ubuntu, macOS, and Windows with `uv sync --dev --frozen`. If you change dependencies, run `uv lock` and commit `uv.lock`, otherwise CI fails at install.
@@ -122,6 +123,7 @@ The general rules live in `.claude/rules/` (`testing.md` and `code-quality.md` a
 - Commits made from Claude Code sessions are SSH-signed with a key GitHub does not know, so PRs show `mergeStateStatus: BLOCKED` even when green. Verify the PR is open, not draft, mergeable, and zero commits behind `main`, then a maintainer runs `gh pr merge N --squash --admin`. GitHub signs the squash commit. Never rebase-merge (rewritten commits lose verification).
 - No AI attribution in commits or PR bodies: no `Co-Authored-By: Claude`, no "Generated with" footer.
 - Conventional-commit prefixes in PR titles (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `release:`).
+- Native binaries: the `binaries` job in `release.yml` runs after `publish`, builds a one-file executable per platform from `packaging/upbox.spec`, runs `packaging/smoke.sh` against it, and attaches `.tar.gz`, `.dmg`, `.exe`, and `.sha256` files to the release. Build only inside the project environment (`uv sync --group build`, then `uv run pyinstaller packaging/upbox.spec`); `uv run --with pyinstaller` fails because the mitmproxy Linux hook resolves the redirector through the environment's scripts directory. A manual `workflow_dispatch` run builds and smoke-tests without publishing.
 - Releases: bump `version` in `pyproject.toml` and `__version__` in `upbox/__init__.py` (they must match), date the changelog heading, update `ROADMAP.md`, merge the `release/vX.Y.Z` PR, then tag `vX.Y.Z` on `main` and push the tag. `release.yml` verifies tag == pyproject version, builds, publishes to PyPI via trusted publishing, and creates the GitHub release. PyPI versions cannot be reused, so the tag is the point of no return; confirm with the maintainer before pushing it. Full runbook: `docs/release-checklist.md` and `CONTRIBUTING.md`.
 
 ## Repo automation you will run into

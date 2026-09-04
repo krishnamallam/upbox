@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.4.0 (unreleased)
+
+### Added
+
+- **Native binaries.** Every release now ships one-file executables built by
+  PyInstaller on GitHub's runners: `upbox-<version>-windows-x86_64.exe`,
+  `upbox-<version>-macos-arm64.dmg` (a disk image holding the `upbox` binary
+  and a README), and `upbox-<version>-linux-x86_64.tar.gz`, each with a
+  `.sha256` beside it. No Python needed. Same CLI as the PyPI package,
+  mitmproxy's local-mode redirectors bundled. Each binary is smoke-tested on
+  its own platform before it is attached to the release. Unsigned for now;
+  `docs/installing.md` has the Gatekeeper and SmartScreen steps and the
+  checksum commands.
+
+### Changed
+
+- `upbox start` spawns its proxy and dashboard children correctly when running
+  from a frozen binary, where `sys.executable` is upbox itself rather than a
+  Python interpreter.
+
+### Internal
+
+- `uv sync --group build` installs PyInstaller. `packaging/upbox.spec` is the
+  build input, `packaging/smoke.sh` the acceptance test, and the release
+  workflow's new `binaries` job runs both on three platforms after the PyPI
+  publish. A manual `workflow_dispatch` run builds and tests without
+  publishing.
+- The release workflow attaches only the wheel and sdist, not the
+  `.gitignore` that `uv build` leaves in `dist/`.
+
 ## v0.3.0 (2026-09-04)
 
 The subject-rights release. Store less, show what is stored, erase on request,

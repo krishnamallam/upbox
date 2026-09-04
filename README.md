@@ -41,6 +41,30 @@ Pick whichever method fits your setup. All of them give you the same `upbox` com
 
 > The PyPI package is named **`upbox-sh`** (the bare `upbox` name was already taken by an unrelated project). The command it installs is still **`upbox`**, so you `pipx install upbox-sh`, then run `upbox`.
 
+### Native binaries (no Python needed)
+
+Download the file for your platform from the
+[releases page](https://github.com/krishnamallam/upbox/releases):
+`upbox-<version>-windows-x86_64.exe`, `upbox-<version>-macos-arm64.dmg`, or
+`upbox-<version>-linux-x86_64.tar.gz`, each with a `.sha256` next to it.
+
+```sh
+# macOS (Apple Silicon): open the .dmg, then
+cp /Volumes/upbox/upbox /usr/local/bin/upbox
+xattr -d com.apple.quarantine /usr/local/bin/upbox   # unsigned binary; Gatekeeper refuses it otherwise
+
+# Linux (glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+, Fedora 36+)
+tar -xzf upbox-*-linux-x86_64.tar.gz && sudo install upbox /usr/local/bin/upbox
+
+# Windows: rename to upbox.exe and put it on PATH. SmartScreen warns once:
+# "More info", then "Run anyway".
+```
+
+The binaries are unsigned; [docs/installing.md](docs/installing.md#native-binaries)
+explains why, how to verify the checksum, and what the first start does.
+`upbox start` still needs admin or root for OS-level capture. Intel Macs and
+other architectures: use pipx below.
+
 ### pipx *(recommended)*
 
 `pipx` installs CLI tools into an isolated venv but keeps them on `PATH`. No conflicts with your system Python.
