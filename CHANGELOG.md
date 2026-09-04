@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (unreleased)
+## v0.2.0 (2026-09-04)
 
 The compliance release, reshaped. v0.2 was scoped as the "AI Act enforcement"
 release for 1 August 2026. On 24 July 2026,
@@ -13,6 +13,11 @@ transparency did start on 2 August 2026, and GDPR always applied.
 So this release is about making the audit log hold up as evidence, and about not
 creating legal risk for the people who deploy it.
 
+A note on v0.1.2: it was merged on 2026-06-30 but never tagged or published, so
+PyPI went from 0.1.1 straight to 0.2.0. The live-reload and the Anthropic/OpenAI
+key redaction fix listed under v0.1.2 below reach PyPI users for the first time
+in this release. If you installed from PyPI you are on 0.1.1 and should upgrade.
+
 ### Security
 
 - **Auth-bearing headers are no longer stored.** `headers_json` kept
@@ -23,8 +28,19 @@ creating legal risk for the people who deploy it.
   running upbox, rotate any keys used through it and delete the old database.**
   This is deliberately not counted in `redactions_applied_json`, which means
   "upbox changed what was sent": the real value still went to the destination.
+- **Credentials in the URL query string are no longer stored.** `path` is
+  recorded with the query attached, and Google (among others) accepts an API key
+  there, so `?key=...` was written verbatim. Worse than the header case: `path`
+  is chained directly rather than via a digest, so retention could never clear
+  it afterwards. Values for known credential parameters (`key`, `api_key`,
+  `access_token`, `token`, `client_secret`, and similar) are now replaced with
+  `[REDACTED:query]` at capture. The rotate-and-delete advice above applies to
+  these too.
 - **Owner-only permissions** (`0700` on `~/.upbox`, `0600` on the database and
   its `-wal`/`-shm`) are enforced at every open.
+- **The dashboard no longer writes to the database.** It opens read-only, and no
+  longer runs schema migrations on your data from the reader process. `upbox
+  start` initialises the database once, before either child starts.
 
 ### Added
 
@@ -57,8 +73,6 @@ creating legal risk for the people who deploy it.
   encryption and reports whether it is on. See the "At rest" section of the
   README for the full reasoning.
 - **Team mode moved to v0.3**, behind the workplace-deployment groundwork.
-- The dashboard opens the database read-only. The chain is only sound with a
-  single writer, and a stray dashboard write would verify as tampering.
 - The "Article 26 export format" on the roadmap became `upbox.audit.v1`.
   Article 26(6) covers logs the high-risk AI system generates about itself;
   upbox observes the network from outside the system and cannot produce those.
@@ -75,7 +89,7 @@ creating legal risk for the people who deploy it.
 - Noted that `docs/ai-act-mapping.md` had documented a `blocked` column renamed
   to `enforcement` back in v0.1.0.
 
-## v0.1.2 (2026-06-16)
+## v0.1.2 (never published, folded into v0.2.0)
 
 Live-reload of rule files and a redaction-leak fix.
 
