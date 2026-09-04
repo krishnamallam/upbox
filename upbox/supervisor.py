@@ -16,7 +16,11 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
+import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -34,12 +38,14 @@ def run(
     capture_spec: str | None = None,
     use_allowlist: bool = True,
     extra_allow_hosts: tuple[str, ...] = (),
+    open_dashboard: bool = False,
 ) -> int:
     """Spawn proxy + dashboard, wait until either dies. Returns the dead child's rc.
 
     ``capture_spec`` is forwarded to ``upbox proxy`` as mitmproxy's LocalMode
     intercept spec. ``use_allowlist`` and ``extra_allow_hosts`` control the
-    TLS allowlist derived from ``tools.yaml``.
+    TLS allowlist derived from ``tools.yaml``. ``open_dashboard`` opens the
+    dashboard in the default browser once it answers.
     """
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(os.getpid()))
@@ -78,6 +84,13 @@ def run(
         signal.signal(signal.SIGTERM, _forward_signal)
 
     print(f"upbox: proxy=127.0.0.1:{proxy_port}  dashboard=http://127.0.0.1:{dashboard_port}")
+    if open_dashboard:
+        threading.Thread(
+            target=open_dashboard_when_ready,
+            args=(f"http://127.0.0.1:{dashboard_port}/",),
+            daemon=True,
+            name="upbox-open-dashboard",
+        ).start()
 
     try:
         while True:
@@ -90,6 +103,45 @@ def run(
             time.sleep(POLL_INTERVAL)
     finally:
         PID_FILE.unlink(missing_ok=True)
+
+
+def wait_until_ready(
+    url: str,
+    probe: Callable[[str], bool],
+    attempts: int = 60,
+    delay: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Poll ``probe(url)`` until it answers true or ``attempts`` run out."""
+    for _ in range(attempts):
+        if probe(url):
+            return True
+        sleep(delay)
+    return False
+
+
+def _http_answers(url: str) -> bool:
+    # Loopback only: the dashboard binds 127.0.0.1, so this is not an outbound call.
+    try:
+        with urllib.request.urlopen(url, timeout=1):
+            return True
+    except Exception:
+        return False
+
+
+def open_dashboard_when_ready(
+    url: str,
+    probe: Callable[[str], bool] = _http_answers,
+    opener: Callable[[str], bool] = webbrowser.open,
+    attempts: int = 60,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Open ``url`` in the default browser once the dashboard answers; give up after ~30 s."""
+    if wait_until_ready(url, probe, attempts=attempts, sleep=sleep):
+        opener(url)
+        return True
+    log.warning("dashboard did not answer at %s; not opening a browser", url)
+    return False
 
 
 def _initialise_database() -> None:

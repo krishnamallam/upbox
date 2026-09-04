@@ -73,13 +73,16 @@ shows "Windows protected your PC" once: click "More info", then "Run anyway".
 PyInstaller one-file binaries occasionally trip Defender's heuristics; if the
 file is quarantined, install with pipx instead and tell us in an issue.
 
-upbox is a command-line tool, so double-clicking `upbox.exe` does not start
-anything: it opens a window that explains the two commands and waits for Enter.
-Run it from PowerShell instead:
+Double-click `upbox.exe` to start it. Windows asks for administrator permission,
+because OS-level capture installs a network driver. A console opens and, the
+first time, asks before installing the local CA into your own user's Trusted
+Root store. upbox then starts and the dashboard opens in your browser. Close the
+window to stop upbox. If you decline the permission prompt, the window explains
+the PowerShell commands instead:
 
 ```powershell
 .\upbox.exe init     # one-time CA install
-.\upbox.exe start    # needs an administrator PowerShell: right-click, Run as administrator
+.\upbox.exe start    # needs an administrator PowerShell; add --open to open the dashboard
 ```
 
 Once `upbox.exe` is on `PATH`, drop the `.\` prefix.
