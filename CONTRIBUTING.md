@@ -34,7 +34,7 @@ See [README — Development](README.md#development) for the full list.
 2. Run `pytest`, `ruff check`, `ruff format --check`, and `mypy upbox` before pushing. CI runs the same on Ubuntu, macOS, and Windows — it will catch you otherwise.
 3. Keep PRs focused: one logical change per PR. Easier to review, easier to revert.
 4. Use conventional-commit prefixes in the PR title: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
-5. Update [`CHANGELOG.md`](CHANGELOG.md) under the `## [Unreleased]` heading when your change is user-visible.
+5. Update [`CHANGELOG.md`](CHANGELOG.md) under the `## vX.Y.Z (unreleased)` heading when your change is user-visible (create the heading for the next version if it does not exist yet).
 
 ## Project conventions
 
@@ -43,7 +43,7 @@ The project's load-bearing decisions live in [`CLAUDE.md`](CLAUDE.md) at the rep
 - mitmproxy is the proxy core. We use its addon API; we never fork it.
 - Two long-running processes (`upbox proxy`, `upbox dashboard`) spawned by `upbox start` (supervisor). IPC is **only** via SQLite WAL. Never embed mitmproxy inside FastAPI.
 - SQLite via stdlib `sqlite3` in WAL mode. No ORM.
-- HTMX + Pico.css for the dashboard. No build step.
+- FastAPI + Jinja2 server-rendered partials with vanilla JS and CSS for the dashboard. No build step, no frontend framework.
 - The dashboard binds to `127.0.0.1` only.
 - upbox itself makes no outbound calls beyond the proxied requests it forwards.
 
@@ -69,8 +69,8 @@ The PyPI publish step uses `skip-existing: true` so a re-run after a partial fai
 
 ### Cutting a release
 
-1. Bump `version` in [`pyproject.toml`](pyproject.toml).
-2. Move the `## [Unreleased]` block in [`CHANGELOG.md`](CHANGELOG.md) under a new `## [vX.Y.Z] — YYYY-MM-DD` heading.
+1. Bump `version` in [`pyproject.toml`](pyproject.toml) and `__version__` in `upbox/__init__.py`; they must match.
+2. Date the `## vX.Y.Z (unreleased)` heading in [`CHANGELOG.md`](CHANGELOG.md) as `## vX.Y.Z (YYYY-MM-DD)` and mark the milestone shipped in [`ROADMAP.md`](ROADMAP.md).
 3. Commit the bump, open a PR, get it merged into `main`.
 4. Tag the merge commit and push the tag:
    ```sh
