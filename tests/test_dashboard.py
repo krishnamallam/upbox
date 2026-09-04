@@ -749,36 +749,19 @@ def test_sidebar_links_to_the_transparency_page(client: TestClient) -> None:
     assert 'href="/transparency"' in response.text
 
 
-def _downgrade_to_v3(db: Path) -> None:
-    import sqlite3
-
-    conn = sqlite3.connect(db)
-    for column in ("omitted_fields", "erased_at", "erased_reason"):
-        conn.execute(f"ALTER TABLE requests DROP COLUMN {column}")
-    conn.execute("UPDATE schema_version SET version = 3")
-    conn.commit()
-    conn.close()
-
-
-def test_schema_behind_database_returns_503(populated_db: Path) -> None:
-    _downgrade_to_v3(populated_db)
-
-    with TestClient(create_app(populated_db)) as c:
+def test_schema_behind_database_returns_503(v3_db: Path) -> None:
+    with TestClient(create_app(v3_db)) as c:
         response = c.get("/")
 
     assert response.status_code == 503
 
 
-def test_schema_behind_notice_names_the_fix(populated_db: Path) -> None:
-    _downgrade_to_v3(populated_db)
-
-    assert "upbox start" in _get(populated_db, "/")
+def test_schema_behind_notice_names_the_fix(v3_db: Path) -> None:
+    assert "upbox start" in _get(v3_db, "/")
 
 
-def test_static_assets_still_serve_when_schema_behind(populated_db: Path) -> None:
-    _downgrade_to_v3(populated_db)
-
-    with TestClient(create_app(populated_db)) as c:
+def test_static_assets_still_serve_when_schema_behind(v3_db: Path) -> None:
+    with TestClient(create_app(v3_db)) as c:
         response = c.get("/static/dashboard.css")
 
     assert response.status_code == 200
