@@ -30,7 +30,7 @@ DEFAULT_DB_PATH = Path.home() / ".upbox" / "upbox.db"
 # Bumped whenever _migrate gains a step. Fresh databases are created at the
 # final shape by schema.sql and then run every migration anyway; each one is
 # guarded so it is a no-op on an already-correct schema.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Columns added by the v2 hash-chain migration, with their affinities. seq must
 # be INTEGER: under TEXT affinity SQLite would store 10 as '10' and order it
@@ -48,6 +48,15 @@ _V3_RETENTION_COLUMNS = {
     "pruned_at": "TEXT",
     "pruned_fields": "TEXT",
     "legal_hold": "INTEGER NOT NULL DEFAULT 0",
+}
+
+# Columns added by the v4 subject-rights migration. omitted_fields records what
+# capture.yaml told the proxy not to store; erased_at / erased_reason mark a
+# tombstone left by `upbox erase`.
+_V4_SUBJECT_RIGHTS_COLUMNS = {
+    "omitted_fields": "TEXT",
+    "erased_at": "TEXT",
+    "erased_reason": "TEXT",
 }
 
 # Text columns retention clears, paired with the digest column that keeps the
@@ -84,19 +93,23 @@ class RequestRecord:
     req_bytes: int
     resp_bytes: int | None
     status: int | None
-    headers_json: str
+    headers_json: str | None
     body_excerpt: str | None
     body_hash: str | None
     redactions_applied_json: str | None
     enforcement: str | None
+    # JSON list of content columns the capture policy withheld, or None when
+    # everything was stored. Mirrors pruned_fields so "never stored" and
+    # "cleared later" stay distinguishable.
+    omitted_fields: str | None = None
 
 
 _INSERT_COLUMNS = (
     "ts, tool, method, scheme, host, path, req_bytes, resp_bytes, status, "
     "headers_json, body_excerpt, body_hash, redactions_applied_json, enforcement, "
-    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256"
+    "seq, prev_hash, entry_hash, headers_sha256, body_excerpt_sha256, omitted_fields"
 )
-_INSERT_PLACEHOLDERS = ", ".join("?" * 19)
+_INSERT_PLACEHOLDERS = ", ".join("?" * 20)
 
 
 class ReadOnlyStoreError(RuntimeError):
@@ -200,6 +213,8 @@ class Store:
             self._migrate_v2_chain()
         if version < 3:
             self._migrate_v3_retention()
+        if version < 4:
+            self._migrate_v4_subject_rights()
         self._conn.execute(
             "INSERT INTO schema_version (id, version) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
@@ -209,6 +224,11 @@ class Store:
     def _schema_version(self) -> int:
         row = self._conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
         return int(row[0]) if row is not None else 0
+
+    @property
+    def schema_version(self) -> int:
+        """Version recorded in the database, 0 for a pre-v0.2 file."""
+        return self._schema_version()
 
     def _request_columns(self) -> set[str]:
         return {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
@@ -243,6 +263,12 @@ class Store:
     def _migrate_v3_retention(self) -> None:
         columns = self._request_columns()
         for name, definition in _V3_RETENTION_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
+
+    def _migrate_v4_subject_rights(self) -> None:
+        columns = self._request_columns()
+        for name, definition in _V4_SUBJECT_RIGHTS_COLUMNS.items():
             if name not in columns:
                 self._conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
 
@@ -307,6 +333,7 @@ class Store:
                     entry_hash,
                     headers_sha256,
                     body_excerpt_sha256,
+                    record.omitted_fields,
                 ),
             )
             self._conn.execute(

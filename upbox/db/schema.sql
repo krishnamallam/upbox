@@ -49,7 +49,19 @@ CREATE TABLE IF NOT EXISTS requests (
     -- retention pass.
     pruned_at                TEXT,
     pruned_fields            TEXT,
-    legal_hold               INTEGER NOT NULL DEFAULT 0
+    legal_hold               INTEGER NOT NULL DEFAULT 0,
+
+    -- Capture policy. omitted_fields lists the content columns capture.yaml
+    -- told the proxy not to store (body_excerpt, headers_json), so "never
+    -- stored" is distinguishable from "cleared later" (pruned_fields) and
+    -- from a request that simply had no body.
+    omitted_fields           TEXT,
+
+    -- Erasure on request (GDPR Article 17). A tombstone keeps id, ts, seq,
+    -- prev_hash and entry_hash so the chain still links through it, and
+    -- nothing else. erased_reason is what the operator gave `upbox erase`.
+    erased_at                TEXT,
+    erased_reason            TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_requests_ts   ON requests(ts);

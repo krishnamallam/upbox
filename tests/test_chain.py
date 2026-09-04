@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from upbox.db import chain
-from upbox.db.store import ReadOnlyStoreError, RequestRecord, Store
+from upbox.db.store import SCHEMA_VERSION, ReadOnlyStoreError, RequestRecord, Store
 
 
 @pytest.fixture
@@ -450,3 +450,35 @@ def test_redactions_column_is_chained(tmp_store: Store) -> None:
     tmp_store._conn.execute("UPDATE requests SET redactions_applied_json = '[]' WHERE seq = 1")
 
     assert tmp_store.verify_chain().status == "broken"
+
+
+def _downgrade_to_v3(path: Path) -> None:
+    """Shape a fresh database the way v0.2.0 shipped it: no subject-rights columns."""
+    import sqlite3
+
+    Store(path).close()
+    conn = sqlite3.connect(path)
+    for column in ("omitted_fields", "erased_at", "erased_reason"):
+        conn.execute(f"ALTER TABLE requests DROP COLUMN {column}")
+    conn.execute("UPDATE schema_version SET version = 3")
+    conn.commit()
+    conn.close()
+
+
+def test_v3_database_gains_the_subject_rights_columns(tmp_path: Path) -> None:
+    path = tmp_path / "v3.db"
+    _downgrade_to_v3(path)
+
+    store = Store(path)
+    columns = {row[1] for row in store._conn.execute("PRAGMA table_info(requests)")}
+
+    assert {"omitted_fields", "erased_at", "erased_reason"} <= columns
+
+
+def test_migrated_v3_database_reports_the_current_schema_version(tmp_path: Path) -> None:
+    path = tmp_path / "v3.db"
+    _downgrade_to_v3(path)
+
+    store = Store(path)
+
+    assert store.schema_version == SCHEMA_VERSION
