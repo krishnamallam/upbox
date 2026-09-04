@@ -3,7 +3,7 @@
 # unrelated, dormant 2022 project, so we publish as "upbox-sh" (matches the
 # upbox.sh homepage). The import package and CLI command are still `upbox`.
 name = "upbox-sh"
-version = "0.3.0"
+version = "0.4.0"
 description = "See, audit, and control what your AI tools send to the cloud."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -39,6 +39,9 @@ Documentation = "https://github.com/krishnamallam/upbox#readme"
 Changelog = "https://github.com/krishnamallam/upbox/blob/main/CHANGELOG.md"
 
 [dependency-groups]
+# `uv sync --group build` for the PyInstaller binaries. Kept out of `dev` so
+# the test matrix does not pay for it.
+build = ["pyinstaller>=6.11"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

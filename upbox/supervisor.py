@@ -99,11 +99,21 @@ def _initialise_database() -> None:
     Store().close()
 
 
+def _child_command(args: list[str]) -> list[str]:
+    """Argv for a child process, whether we run from source or from a frozen binary.
+
+    A PyInstaller one-file build has ``sys.executable`` pointing at the binary
+    itself, which already runs the Typer app, so ``-m upbox`` would reach it as
+    unknown options. From source, ``-m upbox`` (via ``upbox/__main__.py``) is
+    what invokes the app; ``-m upbox.cli`` would import the module and exit.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *args]
+    return [sys.executable, "-m", SPAWN_MODULE, *args]
+
+
 def _spawn(args: list[str]) -> subprocess.Popen[bytes]:
-    # `-m upbox` (via `upbox/__main__.py`) actually invokes the typer app.
-    # `-m upbox.cli` would just import the module and exit rc=0, because
-    # cli.py has no `if __name__ == "__main__"` block.
-    return subprocess.Popen([sys.executable, "-m", SPAWN_MODULE, *args])
+    return subprocess.Popen(_child_command(args))
 
 
 def _stop_all(procs: dict[str, subprocess.Popen[bytes]]) -> None:

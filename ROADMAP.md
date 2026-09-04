@@ -73,9 +73,12 @@ Moved out of v0.2:
   subject-transparency report (`upbox report`, `/transparency`), and
   chain-preserving per-record erasure (`upbox erase`).
 
+## v0.4: native binaries (in progress)
+
+- **Shipped in this branch:** one-file `upbox` executables for Windows x86_64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x86_64 (`.tar.gz`), built and smoke-tested in the release workflow. Unsigned; a code-signing certificate follows if antivirus false positives become a real problem.
+
 ## Later
 
-- **Native binaries:** single-file `.exe` for Windows, `.dmg` (or Homebrew formula) for macOS, AppImage for Linux. Lets non-Python users install in one click. Likely via PyInstaller; code-signing cert before shipping if antivirus false positives become a real problem.
 - **Workplace deployment pack:** worker notice template, DPIA skeleton
   keyed to upbox's actual data flows, works-council checklist. Blocks
   team mode.
