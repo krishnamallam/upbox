@@ -198,7 +198,7 @@ uv sync --dev
 Then:
 
 ```sh
-# Run the full test suite (~4s, 137 tests)
+# Run the full test suite (~7s)
 uv run pytest -v
 
 # Run a single test file
@@ -229,7 +229,7 @@ CI runs the same on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The f
                            ▼                ▼
                 ┌──────────────────┐    ┌──────────────────┐
     AI tool ──▶ │  upbox proxy     │    │  upbox dashboard │ ◀── browser
-                │  mitmproxy +     │    │  FastAPI + HTMX  │     127.0.0.1
+                │  mitmproxy +     │    │ FastAPI + Jinja2 │     127.0.0.1
                 │  upbox addons    │    │  :8800           │
                 │  :8888           │    └─────────┬────────┘
                 └──┬───────────┬───┘              │
@@ -243,7 +243,7 @@ CI runs the same on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The f
 
 `upbox start` is a supervisor: it spawns `upbox proxy` and `upbox dashboard` as separate child processes and forwards `SIGINT` / `SIGTERM` to both. If either child dies, the supervisor kills the other and exits with the dead child's status (see [`upbox/supervisor.py`](upbox/supervisor.py)).
 
-The proxy and dashboard never talk to each other directly. They share state through SQLite running in WAL mode: the proxy writes audit rows; the dashboard reads them. SQLite WAL is the IPC. mitmproxy is the proxy core (MIT-licensed, battle-tested). FastAPI + HTMX for the dashboard: fast, no build step, no JS framework.
+The proxy and dashboard never talk to each other directly. They share state through SQLite running in WAL mode: the proxy writes audit rows; the dashboard reads them. SQLite WAL is the IPC. mitmproxy is the proxy core (MIT-licensed, battle-tested). FastAPI + Jinja2 for the dashboard: server-rendered partials refreshed by a few hundred lines of vanilla JS, no build step, no JS framework.
 
 ## Threat model
 
@@ -371,7 +371,7 @@ upbox stands on:
 
 - **[mitmproxy](https://mitmproxy.org)** (MIT): the proxy core.
 - **[FastAPI](https://fastapi.tiangolo.com)** (MIT): the dashboard backend.
-- **[HTMX](https://htmx.org)** (BSD-2-Clause): the dashboard frontend without a build step.
+- **[Jinja2](https://jinja.palletsprojects.com)** (BSD-3-Clause): the dashboard templates, rendered server-side with no build step.
 - **[SQLite](https://sqlite.org)** (public domain): the audit log store.
 - **[Geist](https://vercel.com/font)** and **[JetBrains Mono](https://www.jetbrains.com/lp/mono/)**: the dashboard's sans + mono typefaces.
 - **[Typer](https://typer.tiangolo.com)** (MIT): the CLI.
